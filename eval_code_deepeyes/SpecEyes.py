@@ -1,6 +1,7 @@
 import argparse
 import os
 import json
+import copy as pycopy
 import pandas as pd
 from tqdm import tqdm
 import time
@@ -45,6 +46,12 @@ def parse_arguments():
         default=None,
         help="Optional acceptance threshold used only when memory is enabled",
     )
+    parser.add_argument(
+        "--memory_trigger_threshold",
+        type=float,
+        default=None,
+        help="Optional threshold for deciding whether to trigger memory retrieval on small-model candidates",
+    )
     parser.add_argument('--baseline', action='store_true')
     parser.add_argument('--mode', type=str, choices=['min', 'mean', 'bottom20', 'log'], default='min')
     parser.add_argument('--batch_size', type=int, default=6, help="Batch size for batch processing")
@@ -60,8 +67,14 @@ def parse_arguments():
     parser.add_argument(
         '--memory_prompt_style',
         type=str,
-        choices=['default', 'compact_spatial'],
+        choices=['default', 'compact_spatial', 'compact_general', 'empty_scaffold', 'no_memory'],
         default='default',
+    )
+    parser.add_argument(
+        '--memory_task_policy',
+        type=str,
+        default='',
+        help='Comma-separated task overrides, e.g. direct_attributes:on:compact_general:0.98:1,relative_position:off',
     )
     parser.add_argument(
         '--memory_retrieval_style',
@@ -104,10 +117,97 @@ def get_memory_tag(args):
     return f"mem=dual-{prompt_scope}-l{args.logic_top_k}-v{args.visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
 
 
-def get_acceptance_threshold(args):
+def parse_memory_task_policy(policy_str):
+    if not policy_str:
+        return {}
+
+    policies = {}
+    for raw_entry in policy_str.split(','):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        parts = [part.strip() for part in entry.split(':')]
+        if len(parts) < 2:
+            raise ValueError(f"Invalid memory task policy entry: {entry}")
+        task_name = parts[0]
+        enabled_token = parts[1].lower()
+        if enabled_token not in {'on', 'off'}:
+            raise ValueError(f"Invalid memory enable flag in task policy: {entry}")
+        policy = {
+            'enabled': enabled_token == 'on',
+            'prompt_style': None,
+            'threshold': None,
+            'logic_top_k': None,
+            'trigger_threshold': None,
+        }
+        if len(parts) >= 3 and parts[2]:
+            policy['prompt_style'] = parts[2]
+        if len(parts) >= 4 and parts[3]:
+            policy['threshold'] = float(parts[3])
+        if len(parts) >= 5 and parts[4]:
+            policy['logic_top_k'] = int(parts[4])
+        if len(parts) >= 6 and parts[5]:
+            policy['trigger_threshold'] = float(parts[5])
+        policies[task_name] = policy
+    return policies
+
+
+def infer_memory_task(data_item, args):
+    if args.benchmark == 'vstar':
+        return data_item.get('test_type', args.test_type)
+    if args.benchmark == 'pope':
+        return data_item.get('category') or data_item.get('test_type', args.test_type)
+    if args.benchmark == 'hr':
+        return data_item.get('category') or data_item.get('test_type', args.test_type)
+    return data_item.get('test_type', args.test_type)
+
+
+
+def resolve_memory_policy(data_item, args):
+    task_name = infer_memory_task(data_item, args)
+    override = args.memory_task_policies.get(task_name, {})
+    enabled = args.memory_enable
+    if 'enabled' in override:
+        enabled = override['enabled']
+
+    prompt_style = override.get('prompt_style') or args.memory_prompt_style
+    threshold = args.memory_score_threshold if args.memory_enable and args.memory_score_threshold is not None else args.score_threshold
+    if override.get('threshold') is not None:
+        threshold = override['threshold']
+
+    logic_top_k = override.get('logic_top_k') if override.get('logic_top_k') is not None else args.logic_top_k
+    trigger_threshold = args.memory_trigger_threshold
+    if override.get('trigger_threshold') is not None:
+        trigger_threshold = override['trigger_threshold']
+
+    return {
+        'task_name': task_name,
+        'enabled': enabled,
+        'prompt_style': prompt_style,
+        'threshold': threshold,
+        'trigger_threshold': trigger_threshold,
+        'logic_top_k': logic_top_k,
+        'visual_top_k': args.visual_top_k,
+        'memory_mode': args.memory_mode,
+        'retrieval_style': args.memory_retrieval_style,
+    }
+
+
+
+def get_acceptance_threshold(args, policy=None):
+    if policy is not None:
+        return policy['threshold']
     if args.memory_enable and args.memory_score_threshold is not None:
         return args.memory_score_threshold
     return args.score_threshold
+
+
+
+def should_trigger_memory(confidence_score, policy):
+    trigger_threshold = policy.get('trigger_threshold')
+    if trigger_threshold is None:
+        return policy.get('enabled', False)
+    return policy.get('enabled', False) and confidence_score <= trigger_threshold
 
 
 def build_output_filename(args, test_type):
@@ -315,7 +415,10 @@ def get_sample_image_ref(data_item, args):
 
 
 def get_retrieved_memories_for_item(item, args):
-    if not args.memory_enable:
+    policy = item.get('memory_policy') or resolve_memory_policy(item['data_item'], args)
+    item['memory_policy'] = policy
+
+    if not policy['enabled']:
         item['retrieved_logic_memories'] = []
         item['retrieved_visual_memories'] = []
         return [], []
@@ -333,14 +436,14 @@ def get_retrieved_memories_for_item(item, args):
         question=question_prompt,
         image_ref=image_ref,
         memory_dir=args.memory_dir,
-        logic_top_k=args.logic_top_k,
-        visual_top_k=args.visual_top_k,
-        retrieval_style=args.memory_retrieval_style,
+        logic_top_k=policy['logic_top_k'],
+        visual_top_k=policy['visual_top_k'],
+        retrieval_style=policy['retrieval_style'],
     )
 
-    if args.memory_mode == 'logic_only':
+    if policy['memory_mode'] == 'logic_only':
         visual_memories = []
-    elif args.memory_mode == 'visual_only':
+    elif policy['memory_mode'] == 'visual_only':
         logic_memories = []
 
     item['_memory_cache'] = (logic_memories, visual_memories)
@@ -351,8 +454,10 @@ def get_retrieved_memories_for_item(item, args):
 
 def build_small_prompt_with_memory(item, args):
     logic_memories, visual_memories = get_retrieved_memories_for_item(item, args)
+    policy = item.get('memory_policy') or resolve_memory_policy(item['data_item'], args)
+    item['memory_policy'] = policy
 
-    if not args.memory_enable:
+    if not policy['enabled']:
         return item['question_prompt'], logic_memories, visual_memories
 
     prompt_with_memory = augment_small_model_prompt(
@@ -360,7 +465,7 @@ def build_small_prompt_with_memory(item, args):
         visual_memories=visual_memories,
         logic_memories=logic_memories,
         benchmark=args.benchmark,
-        prompt_style=args.memory_prompt_style,
+        prompt_style=policy['prompt_style'],
     )
     return prompt_with_memory, logic_memories, visual_memories
 
@@ -543,25 +648,31 @@ def get_batch_response(messages_list, model, processor, image_patch_size=14, ret
     
     return output_texts, logits_list
 
-def _process_batch_small_model_once(batch_data, small_model, small_processor, args):
-    """Run the small model on a batch and collect confidence scores."""
+def _run_small_model_pass(batch_data, small_model, small_processor, args, use_memory):
     messages_list = []
     question_prompts = []
 
     for item in batch_data:
         messages_to_answer = copy.deepcopy(item['messages'])
-        prompt_with_memory, logic_memories, visual_memories = build_small_prompt_with_memory(item, args)
+        if use_memory:
+            prompt_with_memory, logic_memories, visual_memories = build_small_prompt_with_memory(item, args)
+        else:
+            prompt_with_memory = item['question_prompt']
+            logic_memories, visual_memories = [], []
         messages_to_answer = prepare_messages_to_answer(messages_to_answer, prompt_with_memory, args)
         messages_list.append(messages_to_answer)
         question_prompts.append(prompt_with_memory)
         item['retrieved_logic_memories'] = logic_memories
         item['retrieved_visual_memories'] = visual_memories
 
-    if "Thinking" in args.small_model_path:
-        is_thinking = True
-    else:
-        is_thinking = False
-    output_texts, logits_list = get_batch_response(messages_list, small_model, small_processor, return_probs=True, is_thinking=is_thinking)
+    is_thinking = "Thinking" in args.small_model_path
+    output_texts, logits_list = get_batch_response(
+        messages_list,
+        small_model,
+        small_processor,
+        return_probs=True,
+        is_thinking=is_thinking,
+    )
 
     results = []
     for i, (output_text, logits) in enumerate(zip(output_texts, logits_list)):
@@ -574,10 +685,7 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
         else:
             confidence_score = 0.0
 
-        batch_data[i]['print_messages'].append(
-            {"role": "assistant", "content": output_text}
-        )
-
+        batch_data[i]['print_messages'].append({"role": "assistant", "content": output_text})
         results.append({
             'data_item': batch_data[i]['data_item'],
             'output_text': output_text,
@@ -586,11 +694,53 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
             'messages': messages_list[i],
             'judge_tc': batch_data[i]['judge_tc'],
             'generated_length': logits.shape[0] if logits is not None else 0,
-            'retrieved_logic_memories': batch_data[i].get('retrieved_logic_memories', []),
-            'retrieved_visual_memories': batch_data[i].get('retrieved_visual_memories', []),
+            'retrieved_logic_memories': pycopy.deepcopy(batch_data[i].get('retrieved_logic_memories', [])),
+            'retrieved_visual_memories': pycopy.deepcopy(batch_data[i].get('retrieved_visual_memories', [])),
         })
-
     return results
+
+
+
+def _process_batch_small_model_once(batch_data, small_model, small_processor, args):
+    """Run the small model on a batch and collect confidence scores."""
+    base_results = _run_small_model_pass(batch_data, small_model, small_processor, args, use_memory=False)
+
+    final_results = []
+    rerun_items = []
+    rerun_indices = []
+    for idx, (item, result) in enumerate(zip(batch_data, base_results)):
+        policy = item.get('memory_policy') or resolve_memory_policy(item['data_item'], args)
+        item['memory_policy'] = policy
+        trigger_memory = should_trigger_memory(result['confidence_score'], policy)
+        item['memory_triggered'] = trigger_memory
+        result['memory_triggered'] = trigger_memory
+        result['base_output_text'] = result['output_text']
+        result['base_confidence_score'] = result['confidence_score']
+        if trigger_memory:
+            rerun_items.append(item)
+            rerun_indices.append(idx)
+        else:
+            final_results.append(result)
+
+    if rerun_items:
+        memory_results = _run_small_model_pass(rerun_items, small_model, small_processor, args, use_memory=True)
+        memory_result_by_index = {rerun_indices[i]: memory_results[i] for i in range(len(rerun_indices))}
+    else:
+        memory_result_by_index = {}
+
+    ordered_results = []
+    for idx, result in enumerate(base_results):
+        if idx in memory_result_by_index:
+            memory_result = memory_result_by_index[idx]
+            memory_result['base_output_text'] = result['output_text']
+            memory_result['base_confidence_score'] = result['confidence_score']
+            memory_result['memory_triggered'] = True
+            ordered_results.append(memory_result)
+        else:
+            result['memory_triggered'] = False
+            ordered_results.append(result)
+
+    return ordered_results
 
 
 def process_batch_small_model(batch_data, small_model, small_processor, args):
@@ -610,6 +760,72 @@ def process_batch_small_model(batch_data, small_model, small_processor, args):
         safe_cuda_empty_cache()
         right_results = process_batch_small_model(batch_data[split_idx:], small_model, small_processor, args)
         return left_results + right_results
+
+def build_result_payload(data_item, pred_answer, benchmark):
+    if benchmark == 'vstar':
+        return {
+            "image": data_item['image_path'],
+            "question": data_item['question'],
+            "answer": data_item['answer'],
+            "pred_ans": pred_answer,
+        }
+    if benchmark == 'hr':
+        return {
+            "idx": data_item['idx'],
+            "question": data_item['question'],
+            "answer": data_item['answer'],
+            "answer_str": data_item['answer_str'],
+            "category": data_item['category'],
+            "pred_ans": pred_answer,
+        }
+    if benchmark == 'pope':
+        return {
+            "pid": data_item['pid'],
+            "idx": data_item['idx'],
+            "question_id": data_item['question_id'],
+            "question": data_item['question'],
+            "answer": data_item['answer'],
+            "image_source": data_item['image_source'],
+            "category": data_item['category'],
+            "pred_ans": pred_answer,
+        }
+    raise ValueError(f"Unsupported benchmark: {benchmark}")
+
+
+
+def build_result_record(item, result_data, status, error, small_answer, confidence_score, use_model, generated_length, memory_enabled):
+    policy = item.get('memory_policy', {})
+    logic_memories = pycopy.deepcopy(item.get('retrieved_logic_memories', []))
+    visual_memories = pycopy.deepcopy(item.get('retrieved_visual_memories', []))
+    memory_triggered = item.get('memory_triggered', False)
+    return {
+        "status": status,
+        "error": error,
+        "small_answer": small_answer,
+        "confidence_score": confidence_score,
+        "base_confidence_score": item.get('base_confidence_score', confidence_score),
+        "base_small_answer": item.get('base_small_answer', small_answer),
+        "use_model": use_model,
+        "generated_length": generated_length,
+        "judge_tc": item['judge_tc'],
+        "print_messages": item['print_messages'],
+        "memory_enabled": memory_enabled,
+        "memory_task": policy.get('task_name', ''),
+        "memory_policy": policy,
+        "memory_prompt_style_applied": policy.get('prompt_style', ''),
+        "memory_mode_applied": policy.get('memory_mode', ''),
+        "memory_trigger_threshold_applied": policy.get('trigger_threshold', None),
+        "memory_acceptance_threshold_applied": policy.get('threshold', None),
+        "memory_triggered": memory_triggered,
+        "memory_accept_decision": use_model == 'small' and item['judge_tc'] == 'no',
+        "retrieved_logic_memories": logic_memories,
+        "retrieved_visual_memories": visual_memories,
+        "retrieved_logic_memory_count": len(logic_memories),
+        "retrieved_visual_memory_count": len(visual_memories),
+        "result": result_data,
+    }
+
+
 
 def process_single_large_model(item, large_model, large_processor, args):
     """Run the full large-model reasoning loop for one sample."""
@@ -757,8 +973,10 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                     zip(current_batch, batch_output_texts, batch_messages, batch_print_messages, batch_question_prompts, 
                         batch_images_pil, batch_wh_infos)):
                     
+                    policy = resolve_memory_policy(data_item, args)
                     if output_text.lower().startswith("no"):
                         # Route to the small model branch.
+                        trigger_memory = should_trigger_memory(0.0, policy)
                         small_model_batch.append({
                             'data_item': data_item,
                             'messages': messages,
@@ -766,7 +984,9 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                             'question_prompt': question_prompt,
                             'images_pil': images_pil,
                             'wh_infos': wh_infos,
-                            'judge_tc': "no"
+                            'judge_tc': "no",
+                            'memory_policy': policy,
+                            'memory_triggered': trigger_memory,
                         })
                         no_cnt += 1
                     else:
@@ -782,6 +1002,7 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                             'confidence_score': -1,
                             'retrieved_logic_memories': [],
                             'retrieved_visual_memories': [],
+                            'memory_policy': policy,
                         })
                         yes_cnt += 1
                 
@@ -795,8 +1016,13 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         confidence_score = result['confidence_score']
                         question_prompt = result['question_prompt']
                         judge_tc = result['judge_tc']
-                        acceptance_threshold = get_acceptance_threshold(args)
-                        
+                        policy = item.get('memory_policy') or resolve_memory_policy(data_item, args)
+                        item['memory_policy'] = policy
+                        item['memory_triggered'] = result.get('memory_triggered', False)
+                        item['base_confidence_score'] = result.get('base_confidence_score', confidence_score)
+                        item['base_small_answer'] = result.get('base_output_text', output_text)
+                        acceptance_threshold = get_acceptance_threshold(args, policy)
+
                         if confidence_score > acceptance_threshold:
                             answer_model = "small"
                             status = "success"
@@ -807,48 +1033,20 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                             else:
                                 pred_answer = output_text
 
-                            if args.benchmark == 'vstar':
-                                result_data = {
-                                    "image": data_item['image_path'],
-                                    "question": data_item['question'],
-                                    "answer": data_item['answer'],
-                                    "pred_ans": pred_answer,
-                                }
-                            elif args.benchmark == 'hr':
-                                result_data = {
-                                    "idx": data_item['idx'],
-                                    "question": data_item['question'],
-                                    "answer": data_item['answer'],
-                                    "answer_str": data_item['answer_str'],
-                                    "category": data_item['category'],
-                                    "pred_ans": pred_answer,
-                                }
-                            elif args.benchmark == 'pope':
-                                result_data = {
-                                    "pid": data_item['pid'],
-                                    "idx": data_item['idx'],
-                                    "question_id": data_item['question_id'],
-                                    "question": data_item['question'],
-                                    "answer": data_item['answer'],
-                                    "image_source": data_item['image_source'],
-                                    "category": data_item['category'],
-                                    "pred_ans": pred_answer,
-                                }
-
-                            results.append({
-                                "status": status,
-                                "error": error,
-                                "small_answer": output_text,
-                                "confidence_score": confidence_score,
-                                "use_model": answer_model,
-                                "generated_length": result['generated_length'],
-                                "judge_tc": judge_tc,
-                                "print_messages": item['print_messages'],
-                                "memory_enabled": args.memory_enable,
-                                "retrieved_logic_memories": result.get('retrieved_logic_memories', []),
-                                "retrieved_visual_memories": result.get('retrieved_visual_memories', []),
-                                "result": result_data
-                            })
+                            item['retrieved_logic_memories'] = result.get('retrieved_logic_memories', [])
+                            item['retrieved_visual_memories'] = result.get('retrieved_visual_memories', [])
+                            result_data = build_result_payload(data_item, pred_answer, args.benchmark)
+                            results.append(build_result_record(
+                                item=item,
+                                result_data=result_data,
+                                status=status,
+                                error=error,
+                                small_answer=output_text,
+                                confidence_score=confidence_score,
+                                use_model=answer_model,
+                                generated_length=result['generated_length'],
+                                memory_enabled=policy['enabled'],
+                            ))
                         else:
                             item['confidence_score'] = confidence_score
                             item['small_draft_answer'] = output_text
@@ -873,48 +1071,20 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         pred_answer = output_text
                     
                     # Build the stored result payload.
-                    if args.benchmark == 'vstar':
-                        result_data = {
-                            "image": data_item['image_path'],
-                            "question": data_item['question'],
-                            "answer": data_item['answer'],
-                            "pred_ans": pred_answer,
-                        }
-                    elif args.benchmark == 'hr':
-                        result_data = {
-                            "idx": data_item['idx'],
-                            "question": data_item['question'],
-                            "answer": data_item['answer'],
-                            "answer_str": data_item['answer_str'],
-                            "category": data_item['category'],
-                            "pred_ans": pred_answer,
-                        }
-                    elif args.benchmark == 'pope':
-                        result_data = {
-                            "pid": data_item['pid'],
-                            "idx": data_item['idx'],
-                            "question_id": data_item['question_id'],
-                            "question": data_item['question'],
-                            "answer": data_item['answer'],
-                            "image_source": data_item['image_source'],
-                            "category": data_item['category'],
-                            "pred_ans": pred_answer,
-                        }
-                    
-                    results.append({
-                        "status": status,
-                        "error": error,
-                        "small_answer": item.get('small_draft_answer', ''),
-                        "confidence_score": item['confidence_score'],
-                        "use_model": answer_model,
-                        "generated_length": generated_length,
-                        "judge_tc": item['judge_tc'],
-                        "print_messages": item['print_messages'],
-                        "memory_enabled": args.memory_enable,
-                        "retrieved_logic_memories": item.get('retrieved_logic_memories', []),
-                        "retrieved_visual_memories": item.get('retrieved_visual_memories', []),
-                        "result": result_data
-                    })
+                    result_data = build_result_payload(data_item, pred_answer, args.benchmark)
+                    policy = item.get('memory_policy') or resolve_memory_policy(data_item, args)
+                    item['memory_policy'] = policy
+                    results.append(build_result_record(
+                        item=item,
+                        result_data=result_data,
+                        status=status,
+                        error=error,
+                        small_answer=item.get('small_draft_answer', ''),
+                        confidence_score=item['confidence_score'],
+                        use_model=answer_model,
+                        generated_length=generated_length,
+                        memory_enabled=policy['enabled'],
+                    ))
                 
                 pbar.update(len(current_batch))
                 safe_cuda_empty_cache()
@@ -1029,6 +1199,7 @@ def process_benchmark(args, benchmark, test_types, data_generator_func, model_pa
 def main():
     args = parse_arguments()
     args.memory_dir = resolve_memory_dir(args.memory_dir, args.benchmark)
+    args.memory_task_policies = parse_memory_task_policy(args.memory_task_policy)
     args.memory_tag = get_memory_tag(args)
     os.makedirs(args.output_path, exist_ok=True)
     if args.verbose and args.memory_enable and args.memory_prompt_mode != 'small_only':

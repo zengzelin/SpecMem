@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from collections import Counter
 from pathlib import Path
@@ -62,6 +63,14 @@ COUNT_FAILURE_MODES = {
     "count_over_under",
     "nested_scene_counting",
 }
+
+
+def _attach_retrieval_metadata(memory: dict, score: float | None, rank: int, match_type: str) -> dict:
+    enriched = copy.deepcopy(memory)
+    enriched["_retrieval_score"] = score
+    enriched["_retrieval_rank"] = rank
+    enriched["_retrieval_match"] = match_type
+    return enriched
 
 
 def _tokenize(text: str) -> list[str]:
@@ -147,7 +156,10 @@ def retrieve_logic_memories(
             scored.append((memory, score))
 
     scored.sort(key=lambda x: x[1], reverse=True)
-    return [m for m, _ in scored[:top_k]]
+    selected = []
+    for rank, (memory, score) in enumerate(scored[:top_k], 1):
+        selected.append(_attach_retrieval_metadata(memory, score, rank, "text_overlap"))
+    return selected
 
 
 def retrieve_visual_memories(
@@ -181,10 +193,19 @@ def retrieve_visual_memories(
             fallback_scored.append((memory, score))
 
     if len(exact_matches) >= top_k:
-        return exact_matches[:top_k]
+        return [
+            _attach_retrieval_metadata(memory, None, rank, "exact_image")
+            for rank, memory in enumerate(exact_matches[:top_k], 1)
+        ]
 
     fallback_scored.sort(key=lambda x: x[1], reverse=True)
-    merged = exact_matches + [m for m, _ in fallback_scored]
+    merged = [
+        _attach_retrieval_metadata(memory, None, rank, "exact_image")
+        for rank, memory in enumerate(exact_matches, 1)
+    ]
+    start_rank = len(merged) + 1
+    for offset, (memory, score) in enumerate(fallback_scored, start_rank):
+        merged.append(_attach_retrieval_metadata(memory, score, offset, "text_overlap"))
     return merged[:top_k]
 
 

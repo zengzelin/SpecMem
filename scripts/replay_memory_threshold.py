@@ -137,8 +137,25 @@ def estimate_generated_length(text):
     return len(tokens)
 
 
+def get_routing_metadata(record):
+    policy = record.get("memory_policy", {})
+    return {
+        "judge_tc": record.get("judge_tc", ""),
+        "use_model": record.get("use_model", ""),
+        "confidence_score": record.get("confidence_score", None),
+        "trigger_threshold": record.get("memory_trigger_threshold_applied", policy.get("trigger_threshold")),
+        "threshold": record.get("memory_acceptance_threshold_applied", policy.get("threshold")),
+        "memory_triggered": record.get("memory_triggered", False),
+        "memory_accept_decision": record.get("memory_accept_decision", False),
+        "memory_task": record.get("memory_task", policy.get("task_name", "")),
+        "memory_enabled": record.get("memory_enabled", policy.get("enabled", False)),
+    }
+
+
+
 def phase_two_candidate(record):
-    return record.get("status") != "error" and record.get("judge_tc") == "no"
+    routing = get_routing_metadata(record)
+    return record.get("status") != "error" and routing["judge_tc"] == "no"
 
 
 def score_pope(result):
@@ -197,7 +214,8 @@ def score_record(record, benchmark, test_type):
 
 def build_replayed_record(record, threshold, original_threshold):
     replayed = copy.deepcopy(record)
-    replayed["replay_source_use_model"] = record.get("use_model", "")
+    routing = get_routing_metadata(record)
+    replayed["replay_source_use_model"] = routing["use_model"]
     replayed["replay_applied_threshold"] = threshold
     replayed["replay_original_threshold"] = original_threshold
     replayed["replay_route_changed"] = False
@@ -206,12 +224,12 @@ def build_replayed_record(record, threshold, original_threshold):
     if not phase_two_candidate(record):
         return replayed
 
-    confidence = record.get("confidence_score", None)
+    confidence = routing["confidence_score"]
     if not isinstance(confidence, (int, float)) or confidence < 0:
         return replayed
 
     replay_use_model = "small" if confidence > threshold else "large"
-    original_use_model = record.get("use_model", "")
+    original_use_model = routing["use_model"]
 
     if original_use_model == "small" and replay_use_model == "large":
         raise ValueError(
@@ -252,18 +270,21 @@ def summarise_threshold(records, replayed_records, threshold, benchmark, test_ty
         else:
             large_cnt += 1
 
+        original_routing = get_routing_metadata(original)
+        replay_routing = get_routing_metadata(replayed)
+
         if phase_two_candidate(original):
             phase_two_cnt += 1
-            confidence = original.get("confidence_score", None)
+            confidence = original_routing["confidence_score"]
             if isinstance(confidence, (int, float)) and confidence >= 0:
                 if abs(confidence - threshold) <= near_margin:
                     near_threshold_cnt += 1
 
-        if original.get("use_model") != replayed.get("use_model"):
+        if original_routing["use_model"] != replay_routing["use_model"]:
             reproduces_original_route = False
-            if original.get("use_model") == "small" and replayed.get("use_model") == "large":
+            if original_routing["use_model"] == "small" and replay_routing["use_model"] == "large":
                 small_to_large += 1
-            elif original.get("use_model") == "large" and replayed.get("use_model") == "small":
+            elif original_routing["use_model"] == "large" and replay_routing["use_model"] == "small":
                 large_to_small += 1
 
         original_pred = original.get("result", {}).get("pred_ans", "")
@@ -278,6 +299,8 @@ def summarise_threshold(records, replayed_records, threshold, benchmark, test_ty
             proxy_values.append(score["proxy_acc"])
 
     evaluated_count = small_cnt + large_cnt
+    triggered_cnt = sum(1 for record in replayed_records if get_routing_metadata(record)["memory_triggered"])
+    accepted_cnt = sum(1 for record in replayed_records if get_routing_metadata(record)["memory_accept_decision"])
     summary = {
         "threshold": threshold,
         "acc": round(sum(acc_values) / len(acc_values), 6) if acc_values else None,
@@ -287,6 +310,8 @@ def summarise_threshold(records, replayed_records, threshold, benchmark, test_ty
         "large_cnt": large_cnt,
         "small_ratio": round((small_cnt / evaluated_count) * 100, 4) if evaluated_count else 0.0,
         "phase_two_candidate_count": phase_two_cnt,
+        "triggered_count": triggered_cnt,
+        "accepted_count": accepted_cnt,
         "small_to_large": small_to_large,
         "large_to_small": large_to_small,
         "near_threshold_count": near_threshold_cnt,

@@ -163,11 +163,17 @@ def summarize_print_messages(print_messages, max_chars=1600):
     return summary[: max_chars - 3].rstrip() + "..."
 
 
+def get_memory_policy(record):
+    return record.get("memory_policy", {})
+
+
+
 def build_audit_record(sample_id, base_record, candidate_record):
     base_result = base_record.get("result", {})
     candidate_result = candidate_record.get("result", {})
     candidate_logic = candidate_record.get("retrieved_logic_memories", [])
     candidate_visual = candidate_record.get("retrieved_visual_memories", [])
+    candidate_policy = get_memory_policy(candidate_record)
 
     return {
         "sample_id": sample_id,
@@ -183,6 +189,12 @@ def build_audit_record(sample_id, base_record, candidate_record):
         "candidate_confidence_score": candidate_record.get("confidence_score", None),
         "base_judge_route": base_record.get("judge_tc", ""),
         "candidate_judge_route": candidate_record.get("judge_tc", ""),
+        "candidate_memory_task": candidate_record.get("memory_task", candidate_policy.get("task_name", "")),
+        "candidate_memory_prompt_style": candidate_record.get("memory_prompt_style_applied", candidate_policy.get("prompt_style", "")),
+        "candidate_memory_trigger_threshold": candidate_record.get("memory_trigger_threshold_applied", candidate_policy.get("trigger_threshold", None)),
+        "candidate_memory_threshold": candidate_record.get("memory_acceptance_threshold_applied", candidate_policy.get("threshold", None)),
+        "candidate_memory_triggered": candidate_record.get("memory_triggered", False),
+        "candidate_memory_accept_decision": candidate_record.get("memory_accept_decision", False),
         "candidate_retrieved_logic_memories": candidate_logic,
         "candidate_retrieved_visual_memories": candidate_visual,
         "candidate_retrieved_memory_count": len(candidate_logic) + len(candidate_visual),

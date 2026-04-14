@@ -12,7 +12,7 @@ COMPACT_SPATIAL_HINTS = {
 }
 
 
-def format_logic_memories(memories: list[dict]) -> str:
+def format_logic_memories(memories: list[dict], bullet_style: bool = False) -> str:
     if not memories:
         return "None."
 
@@ -20,14 +20,15 @@ def format_logic_memories(memories: list[dict]) -> str:
     for idx, memory in enumerate(memories, 1):
         guideline = memory.get("guideline", "").strip()
         failure_mode = memory.get("failure_mode", "").strip()
+        prefix = "-" if bullet_style else f"{idx}."
         if failure_mode:
-            lines.append(f"{idx}. [{failure_mode}] {guideline}")
+            lines.append(f"{prefix} [{failure_mode}] {guideline}")
         else:
-            lines.append(f"{idx}. {guideline}")
+            lines.append(f"{prefix} {guideline}")
     return "\n".join(lines)
 
 
-def format_visual_memories(memories: list[dict]) -> str:
+def format_visual_memories(memories: list[dict], bullet_style: bool = False) -> str:
     if not memories:
         return "None."
 
@@ -35,10 +36,11 @@ def format_visual_memories(memories: list[dict]) -> str:
     for idx, memory in enumerate(memories, 1):
         guideline = memory.get("guideline", "").strip()
         visual_pattern = memory.get("visual_pattern", "").strip()
+        prefix = "-" if bullet_style else f"{idx}."
         if visual_pattern:
-            lines.append(f"{idx}. [pattern: {visual_pattern}] {guideline}")
+            lines.append(f"{prefix} [pattern: {visual_pattern}] {guideline}")
         else:
-            lines.append(f"{idx}. {guideline}")
+            lines.append(f"{prefix} {guideline}")
     return "\n".join(lines)
 
 
@@ -85,7 +87,11 @@ def augment_small_model_prompt(
     prompt_style: str = "default",
 ) -> str:
     sections = []
-    use_compact_spatial = prompt_style == "compact_spatial" and _looks_like_spatial_side_question(question_prompt)
+    style = prompt_style or "default"
+    use_compact_spatial = style == "compact_spatial" and _looks_like_spatial_side_question(question_prompt)
+
+    if style == "no_memory":
+        return question_prompt.strip()
 
     if use_compact_spatial and logic_memories:
         compact_logic = _format_compact_logic_memories(logic_memories)
@@ -100,16 +106,31 @@ def augment_small_model_prompt(
             )
             return _append_sections(question_prompt, sections)
 
-    if visual_memories:
-        sections.append(
-            "Relevant visual warnings from past failures:\n"
-            f"{format_visual_memories(visual_memories)}"
-        )
-    if logic_memories:
-        sections.append(
-            "Relevant logical guidelines from past failures:\n"
-            f"{format_logic_memories(logic_memories)}"
-        )
+    if style == "empty_scaffold":
+        sections.append("Relevant visual warnings from past failures:\nNone.")
+        sections.append("Relevant logical guidelines from past failures:\nNone.")
+    elif style == "compact_general":
+        if visual_memories:
+            sections.append(
+                "Compact visual hints:\n"
+                f"{format_visual_memories(visual_memories, bullet_style=True)}"
+            )
+        if logic_memories:
+            sections.append(
+                "Compact logical hints:\n"
+                f"{format_logic_memories(logic_memories, bullet_style=True)}"
+            )
+    else:
+        if visual_memories:
+            sections.append(
+                "Relevant visual warnings from past failures:\n"
+                f"{format_visual_memories(visual_memories)}"
+            )
+        if logic_memories:
+            sections.append(
+                "Relevant logical guidelines from past failures:\n"
+                f"{format_logic_memories(logic_memories)}"
+            )
 
     if not sections:
         return question_prompt.strip()
@@ -118,6 +139,8 @@ def augment_small_model_prompt(
         "Use the image and the retrieved memories carefully. "
         "If a retrieved guideline applies, follow it before answering."
     )
+    if style == "compact_general":
+        guidance = "Use only the hints that clearly match the current image before answering."
     if benchmark == "pope":
         guidance += "\nAnswer yes or no only."
 
