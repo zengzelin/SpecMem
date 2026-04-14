@@ -1,0 +1,10 @@
+{
+    "vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k1-task_aware.jsonl": 862.893,
+    "vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k1.jsonl": 861.373,
+    "vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k2-task_aware.jsonl": 892.3178,
+    "vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k2.jsonl": 895.704,
+    "vstar_relative_position_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k1-task_aware.jsonl": 686.9655,
+    "vstar_relative_position_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k2-task_aware.jsonl": 697.0289,
+    "vstar_relative_position_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k2.jsonl": 703.1244,
+    "vstar_relative_position_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k3-task_aware.jsonl": 655.0824
+}

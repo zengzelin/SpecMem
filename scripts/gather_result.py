@@ -32,6 +32,15 @@ def infer_judge_results_dir(folder):
     )
 
 
+def split_memory_suffix(filename):
+    stem, ext = os.path.splitext(filename)
+    if "_mem=" not in stem:
+        return filename, None
+
+    base_stem, memory_tag = stem.rsplit("_mem=", 1)
+    return f"{base_stem}{ext}", f"mem={memory_tag}"
+
+
 def find_model_marker(filename):
     for marker in ["DeepEyes-7B", "DeepEyes-7b", "Thyme-RL", "thyme-rl"]:
         if marker in filename:
@@ -92,13 +101,14 @@ def main():
         # Let's analyze the filename pattern
         # Example experiment: "hr_hr_bench_4k_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.96.jsonl"
         # Example baseline: "hr_hr_bench_4k_DeepEyes-7B_baseline_6_None_None.jsonl"
-        model_marker = find_model_marker(filename)
+        normalized_filename, _memory_tag = split_memory_suffix(filename)
+        model_marker = find_model_marker(normalized_filename)
         if model_marker is None:
             print(f"Warning: File format not recognized: {filename}")
             continue
         
         # Split the filename to get the part up to and including the model name
-        parts = filename.split(model_marker)
+        parts = normalized_filename.split(model_marker)
         if len(parts) < 2:
             print(f"Warning: Invalid filename format: {filename}")
             continue

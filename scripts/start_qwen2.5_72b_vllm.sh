@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_PATH="${MODEL_PATH:-Qwen/Qwen2.5-72B-Instruct}"
+MODEL_PATH="${MODEL_PATH:-/mnt/public_models/Qwen/Qwen2.5-72B-Instruct}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 PORT="${PORT:-23333}"
 TP_SIZE="${TP_SIZE:-4}"

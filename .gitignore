@@ -7,8 +7,8 @@ c__pycache__/
 venv/
 env/
 data/
-eval_results*/
-judge_results*/
+# eval_results*/
+# judge_results*/
 conf_analysis*/
 eval_code_thyme/temp_processed_images/
 *.log

@@ -1,0 +1,15 @@
+{
+  "base_file": "/home/zelin/SpecMem/eval_results_deepeyes/SpecEyes_vstar_stage1/vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mem=off.jsonl",
+  "candidate_file": "/home/zelin/SpecMem/eval_results_deepeyes/SpecEyes_vstar_stage16_raw/vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mthr=0.98_mem=logic-small-k1.jsonl",
+  "matched_samples": 115,
+  "base_only_samples": 0,
+  "candidate_only_samples": 0,
+  "base_accuracy": 0.9043,
+  "candidate_accuracy": 0.9217,
+  "corrected_count": 2,
+  "harmed_count": 0,
+  "retrieved_no_gain_count": 104,
+  "candidate_memory_hit_count": 106,
+  "base_only_sample_ids": [],
+  "candidate_only_sample_ids": []
+}

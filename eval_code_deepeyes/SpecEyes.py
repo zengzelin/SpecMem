@@ -20,20 +20,14 @@ except ImportError:
 
 try:
     from memory_aug.retriever import retrieve_dual_memories
-    from memory_aug.prompting import (
-        augment_small_model_prompt,
-        augment_large_model_prompt,
-    )
+    from memory_aug.prompting import augment_small_model_prompt
 except ImportError:
     import sys
     ROOT_DIR = Path(__file__).resolve().parents[1]
     if str(ROOT_DIR) not in sys.path:
         sys.path.insert(0, str(ROOT_DIR))
     from memory_aug.retriever import retrieve_dual_memories
-    from memory_aug.prompting import (
-        augment_small_model_prompt,
-        augment_large_model_prompt,
-    )
+    from memory_aug.prompting import augment_small_model_prompt
 
 
 def parse_arguments():
@@ -45,6 +39,12 @@ def parse_arguments():
     parser.add_argument('--output_path', type=str, default='eval_results_deepeyes/SpecEyes')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument("--score_threshold", type=float, default=0.98, help="Acceptance threshold")
+    parser.add_argument(
+        "--memory_score_threshold",
+        type=float,
+        default=None,
+        help="Optional acceptance threshold used only when memory is enabled",
+    )
     parser.add_argument('--baseline', action='store_true')
     parser.add_argument('--mode', type=str, choices=['min', 'mean', 'bottom20', 'log'], default='min')
     parser.add_argument('--batch_size', type=int, default=6, help="Batch size for batch processing")
@@ -52,11 +52,23 @@ def parse_arguments():
     parser.add_argument('--ablation_K', action='store_true')
     parser.add_argument('--ablation_phaseI_Ms', action='store_true')
     parser.add_argument('--memory_enable', action='store_true')
-    parser.add_argument('--memory_dir', type=str, default='memory_data/pope')
+    parser.add_argument('--memory_dir', type=str, default='')
     parser.add_argument('--logic_top_k', type=int, default=3)
     parser.add_argument('--visual_top_k', type=int, default=3)
-    parser.add_argument('--memory_mode', type=str, choices=['dual', 'logic_only', 'visual_only'], default='dual')
-    parser.add_argument('--memory_prompt_mode', type=str, choices=['small_only', 'small_and_large'], default='small_and_large')
+    parser.add_argument('--memory_mode', type=str, choices=['dual', 'logic_only', 'visual_only'], default='logic_only')
+    parser.add_argument('--memory_prompt_mode', type=str, choices=['small_only', 'small_and_large'], default='small_only')
+    parser.add_argument(
+        '--memory_prompt_style',
+        type=str,
+        choices=['default', 'compact_spatial'],
+        default='default',
+    )
+    parser.add_argument(
+        '--memory_retrieval_style',
+        type=str,
+        choices=['default', 'task_aware'],
+        default='default',
+    )
     # v*
     parser.add_argument('--vstar_path', type=str, default="data/vstar")
     # hr-bench
@@ -66,6 +78,55 @@ def parse_arguments():
     args = parser.parse_args()
 
     return args
+
+
+def resolve_memory_dir(memory_dir, benchmark):
+    if memory_dir:
+        return memory_dir
+    return os.path.join("memory_data", benchmark)
+
+
+def get_memory_tag(args):
+    if not args.memory_enable:
+        return "mem=off"
+
+    prompt_scope = "small" if args.memory_prompt_mode == "small_only" else "small-large"
+    prompt_style_suffix = ""
+    if getattr(args, "memory_prompt_style", "default") != "default":
+        prompt_style_suffix = f"-{args.memory_prompt_style}"
+    retrieval_style_suffix = ""
+    if getattr(args, "memory_retrieval_style", "default") != "default":
+        retrieval_style_suffix = f"-{args.memory_retrieval_style}"
+    if args.memory_mode == 'logic_only':
+        return f"mem=logic-{prompt_scope}-k{args.logic_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+    if args.memory_mode == 'visual_only':
+        return f"mem=visual-{prompt_scope}-k{args.visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+    return f"mem=dual-{prompt_scope}-l{args.logic_top_k}-v{args.visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+
+
+def get_acceptance_threshold(args):
+    if args.memory_enable and args.memory_score_threshold is not None:
+        return args.memory_score_threshold
+    return args.score_threshold
+
+
+def build_output_filename(args, test_type):
+    small_model_name = "baseline" if args.baseline else args.small_model_path.split('/')[-1]
+    score_threshold = "None" if args.baseline else args.score_threshold
+    mode = "None" if args.baseline else args.mode
+    memory_threshold_tag = ""
+    if (not args.baseline) and args.memory_enable and args.memory_score_threshold is not None:
+        memory_threshold_tag = f"_mthr={args.memory_score_threshold}"
+    filename = (
+        f"{args.benchmark}_{test_type}_{args.large_model_path.split('/')[-1]}_"
+        f"{small_model_name}_{args.batch_size}_{mode}_{score_threshold}"
+        f"{memory_threshold_tag}_{args.memory_tag}.jsonl"
+    )
+    if args.ablation_K:
+        filename = filename.replace(".jsonl", f"_K={args.K}.jsonl")
+    if args.ablation_phaseI_Ms:
+        filename = filename.replace(".jsonl", "_PhaseIMs.jsonl")
+    return filename
 
 def handle_exception(e, error_prefix):
     full_error_info = traceback.format_exc()
@@ -169,15 +230,14 @@ def load_pope_data_generator(pope_path, test_type):
 def init_messages(messages, print_messages, question_prompt):
 
     instruction_prompt = USER_PROMPT
+    del messages[2:]
+    del print_messages[2:]
     # Reset the system prompt.
     messages[0]["content"] = SYSTEM_PROMPT
     print_messages[0]["content"] = SYSTEM_PROMPT
     # Append the answer instruction to the user prompt.
     messages[1]["content"][-1]["text"] = question_prompt + instruction_prompt
     print_messages[1]["content"][-1]["text"] = question_prompt + instruction_prompt
-
-    # Drop any stale assistant output from the printable trace.
-    print_messages = print_messages[:2]
     return
 
 def init_messages_judge_tc(data_item, args):
@@ -248,16 +308,26 @@ def get_sample_image_ref(data_item, args):
     if args.benchmark == 'vstar':
         return data_item.get('image_path')
     if args.benchmark == 'pope':
-        return str(data_item.get('pid') or data_item.get('question_id') or '')
+        return data_item.get('image_source')
     if args.benchmark == 'hr':
         return str(data_item.get('idx', ''))
     return None
 
 
-def get_retrieved_memories_for_item(data_item, question_prompt, args):
+def get_retrieved_memories_for_item(item, args):
     if not args.memory_enable:
+        item['retrieved_logic_memories'] = []
+        item['retrieved_visual_memories'] = []
         return [], []
 
+    if '_memory_cache' in item:
+        logic_memories, visual_memories = item['_memory_cache']
+        item['retrieved_logic_memories'] = logic_memories
+        item['retrieved_visual_memories'] = visual_memories
+        return logic_memories, visual_memories
+
+    data_item = item['data_item']
+    question_prompt = item['question_prompt']
     image_ref = get_sample_image_ref(data_item, args)
     logic_memories, visual_memories = retrieve_dual_memories(
         question=question_prompt,
@@ -265,6 +335,7 @@ def get_retrieved_memories_for_item(data_item, question_prompt, args):
         memory_dir=args.memory_dir,
         logic_top_k=args.logic_top_k,
         visual_top_k=args.visual_top_k,
+        retrieval_style=args.memory_retrieval_style,
     )
 
     if args.memory_mode == 'logic_only':
@@ -272,44 +343,24 @@ def get_retrieved_memories_for_item(data_item, question_prompt, args):
     elif args.memory_mode == 'visual_only':
         logic_memories = []
 
+    item['_memory_cache'] = (logic_memories, visual_memories)
+    item['retrieved_logic_memories'] = logic_memories
+    item['retrieved_visual_memories'] = visual_memories
     return logic_memories, visual_memories
 
 
-def build_small_prompt_with_memory(data_item, question_prompt, args):
-    logic_memories, visual_memories = get_retrieved_memories_for_item(
-        data_item=data_item,
-        question_prompt=question_prompt,
-        args=args,
-    )
+def build_small_prompt_with_memory(item, args):
+    logic_memories, visual_memories = get_retrieved_memories_for_item(item, args)
 
     if not args.memory_enable:
-        return question_prompt, logic_memories, visual_memories
+        return item['question_prompt'], logic_memories, visual_memories
 
     prompt_with_memory = augment_small_model_prompt(
-        question_prompt=question_prompt,
+        question_prompt=item['question_prompt'],
         visual_memories=visual_memories,
         logic_memories=logic_memories,
         benchmark=args.benchmark,
-    )
-    return prompt_with_memory, logic_memories, visual_memories
-
-
-def build_large_prompt_with_memory(data_item, question_prompt, draft_answer, args):
-    logic_memories, visual_memories = get_retrieved_memories_for_item(
-        data_item=data_item,
-        question_prompt=question_prompt,
-        args=args,
-    )
-
-    if not args.memory_enable or args.memory_prompt_mode != 'small_and_large':
-        return question_prompt, logic_memories, visual_memories
-
-    prompt_with_memory = augment_large_model_prompt(
-        question_prompt=question_prompt,
-        visual_memories=visual_memories,
-        logic_memories=logic_memories,
-        draft_answer=draft_answer,
-        benchmark=args.benchmark,
+        prompt_style=args.memory_prompt_style,
     )
     return prompt_with_memory, logic_memories, visual_memories
 
@@ -492,18 +543,14 @@ def get_batch_response(messages_list, model, processor, image_patch_size=14, ret
     
     return output_texts, logits_list
 
-def process_batch_small_model(batch_data, small_model, small_processor, args):
+def _process_batch_small_model_once(batch_data, small_model, small_processor, args):
     """Run the small model on a batch and collect confidence scores."""
     messages_list = []
     question_prompts = []
 
     for item in batch_data:
         messages_to_answer = copy.deepcopy(item['messages'])
-        prompt_with_memory, logic_memories, visual_memories = build_small_prompt_with_memory(
-            data_item=item['data_item'],
-            question_prompt=item['question_prompt'],
-            args=args,
-        )
+        prompt_with_memory, logic_memories, visual_memories = build_small_prompt_with_memory(item, args)
         messages_to_answer = prepare_messages_to_answer(messages_to_answer, prompt_with_memory, args)
         messages_list.append(messages_to_answer)
         question_prompts.append(prompt_with_memory)
@@ -538,12 +585,31 @@ def process_batch_small_model(batch_data, small_model, small_processor, args):
             'question_prompt': question_prompts[i],
             'messages': messages_list[i],
             'judge_tc': batch_data[i]['judge_tc'],
-            'generated_length': logits.shape[0],
+            'generated_length': logits.shape[0] if logits is not None else 0,
             'retrieved_logic_memories': batch_data[i].get('retrieved_logic_memories', []),
             'retrieved_visual_memories': batch_data[i].get('retrieved_visual_memories', []),
         })
 
     return results
+
+
+def process_batch_small_model(batch_data, small_model, small_processor, args):
+    try:
+        return _process_batch_small_model_once(batch_data, small_model, small_processor, args)
+    except torch.OutOfMemoryError:
+        safe_cuda_empty_cache()
+        if len(batch_data) <= 1:
+            raise
+        split_idx = max(1, len(batch_data) // 2)
+        if args.verbose:
+            print(
+                f"Small-model batch OOM on {len(batch_data)} samples. "
+                f"Retrying with micro-batches of {split_idx} and {len(batch_data) - split_idx}."
+            )
+        left_results = process_batch_small_model(batch_data[:split_idx], small_model, small_processor, args)
+        safe_cuda_empty_cache()
+        right_results = process_batch_small_model(batch_data[split_idx:], small_model, small_processor, args)
+        return left_results + right_results
 
 def process_single_large_model(item, large_model, large_processor, args):
     """Run the full large-model reasoning loop for one sample."""
@@ -554,19 +620,13 @@ def process_single_large_model(item, large_model, large_processor, args):
 
     try:
         step_id = 0
-        large_question_prompt = item['question_prompt']
-        prompt_with_memory, logic_memories, visual_memories = build_large_prompt_with_memory(
-            data_item=item['data_item'],
-            question_prompt=large_question_prompt,
-            draft_answer=item.get('small_draft_answer', ''),
-            args=args,
-        )
-
-        init_messages(item['messages'], item['print_messages'], prompt_with_memory)
+        # Stage 1 keeps the large-model fallback memory-free so we can isolate
+        # memory effects on the speculative small-model branch.
+        init_messages(item['messages'], item['print_messages'], item['question_prompt'])
         messages = item['messages']
         print_messages = item['print_messages']
-        item['retrieved_logic_memories'] = logic_memories
-        item['retrieved_visual_memories'] = visual_memories
+        item.setdefault('retrieved_logic_memories', [])
+        item.setdefault('retrieved_visual_memories', [])
 
         while "<answer>" not in output_text:
             if step_id > 5:
@@ -719,7 +779,9 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                             'images_pil': images_pil,
                             'wh_infos': wh_infos,
                             'judge_tc': "yes",
-                            'confidence_score': -1
+                            'confidence_score': -1,
+                            'retrieved_logic_memories': [],
+                            'retrieved_visual_memories': [],
                         })
                         yes_cnt += 1
                 
@@ -733,8 +795,9 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         confidence_score = result['confidence_score']
                         question_prompt = result['question_prompt']
                         judge_tc = result['judge_tc']
+                        acceptance_threshold = get_acceptance_threshold(args)
                         
-                        if confidence_score > args.score_threshold:
+                        if confidence_score > acceptance_threshold:
                             answer_model = "small"
                             status = "success"
                             error = ""
@@ -862,15 +925,8 @@ def process_test_type(small_model, small_processor, large_model, large_processor
     end_time = time.time()
     if args.verbose:
         print(f"Total time: {end_time - start_time:.2f} seconds")
-    if args.baseline:
-        args.small_model_path = "baseline"
-        args.score_threshold = "None"
-        args.mode = "None"
-    output_path = os.path.join(args.output_path, f"{args.benchmark}_{test_type}_{args.large_model_path.split('/')[-1]}_{args.small_model_path.split('/')[-1]}_{args.batch_size}_{args.mode}_{args.score_threshold}.jsonl")
-    if args.ablation_K:
-        output_path = output_path.replace(".jsonl", f"_K={args.K}.jsonl")
-    if args.ablation_phaseI_Ms:
-        output_path = output_path.replace(".jsonl", f"_PhaseIMs.jsonl")
+    output_filename = build_output_filename(args, test_type)
+    output_path = os.path.join(args.output_path, output_filename)
     
     # Update the per-run latency summary.
     latency_info_path = os.path.join(args.output_path, "latency_summary.json")
@@ -972,7 +1028,11 @@ def process_benchmark(args, benchmark, test_types, data_generator_func, model_pa
 
 def main():
     args = parse_arguments()
+    args.memory_dir = resolve_memory_dir(args.memory_dir, args.benchmark)
+    args.memory_tag = get_memory_tag(args)
     os.makedirs(args.output_path, exist_ok=True)
+    if args.verbose and args.memory_enable and args.memory_prompt_mode != 'small_only':
+        print("Stage-1 keeps the large-model fallback memory-free; memory_prompt_mode only affects run labeling for now.")
 
     small_model, small_processor, large_model, large_processor = load_models(args)
     model_params = (small_model, small_processor, large_model, large_processor)
