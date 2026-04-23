@@ -19,6 +19,7 @@ except ImportError:
     from utils import *
     from prompt import *
 
+
 try:
     from memory_aug.retriever import retrieve_dual_memories
     from memory_aug.prompting import augment_small_model_prompt
@@ -99,22 +100,37 @@ def resolve_memory_dir(memory_dir, benchmark):
     return os.path.join("memory_data", benchmark)
 
 
-def get_memory_tag(args):
-    if not args.memory_enable:
+def get_memory_tag(args, policy=None):
+    enabled = args.memory_enable
+    prompt_style = getattr(args, "memory_prompt_style", "default")
+    retrieval_style = getattr(args, "memory_retrieval_style", "default")
+    memory_mode = args.memory_mode
+    logic_top_k = args.logic_top_k
+    visual_top_k = args.visual_top_k
+
+    if policy is not None:
+        enabled = policy.get('enabled', False)
+        prompt_style = policy.get('prompt_style') or prompt_style
+        retrieval_style = policy.get('retrieval_style') or retrieval_style
+        memory_mode = policy.get('memory_mode') or memory_mode
+        logic_top_k = policy.get('logic_top_k', logic_top_k)
+        visual_top_k = policy.get('visual_top_k', visual_top_k)
+
+    if not enabled:
         return "mem=off"
 
     prompt_scope = "small" if args.memory_prompt_mode == "small_only" else "small-large"
     prompt_style_suffix = ""
-    if getattr(args, "memory_prompt_style", "default") != "default":
-        prompt_style_suffix = f"-{args.memory_prompt_style}"
+    if prompt_style != "default":
+        prompt_style_suffix = f"-{prompt_style}"
     retrieval_style_suffix = ""
-    if getattr(args, "memory_retrieval_style", "default") != "default":
-        retrieval_style_suffix = f"-{args.memory_retrieval_style}"
-    if args.memory_mode == 'logic_only':
-        return f"mem=logic-{prompt_scope}-k{args.logic_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
-    if args.memory_mode == 'visual_only':
-        return f"mem=visual-{prompt_scope}-k{args.visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
-    return f"mem=dual-{prompt_scope}-l{args.logic_top_k}-v{args.visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+    if retrieval_style != "default":
+        retrieval_style_suffix = f"-{retrieval_style}"
+    if memory_mode == 'logic_only':
+        return f"mem=logic-{prompt_scope}-k{logic_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+    if memory_mode == 'visual_only':
+        return f"mem=visual-{prompt_scope}-k{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+    return f"mem=dual-{prompt_scope}-l{logic_top_k}-v{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
 
 
 def parse_memory_task_policy(policy_str):
@@ -171,13 +187,15 @@ def resolve_memory_policy(data_item, args):
         enabled = override['enabled']
 
     prompt_style = override.get('prompt_style') or args.memory_prompt_style
-    threshold = args.memory_score_threshold if args.memory_enable and args.memory_score_threshold is not None else args.score_threshold
-    if override.get('threshold') is not None:
+    threshold = args.score_threshold
+    if enabled and args.memory_score_threshold is not None:
+        threshold = args.memory_score_threshold
+    if enabled and override.get('threshold') is not None:
         threshold = override['threshold']
 
     logic_top_k = override.get('logic_top_k') if override.get('logic_top_k') is not None else args.logic_top_k
-    trigger_threshold = args.memory_trigger_threshold
-    if override.get('trigger_threshold') is not None:
+    trigger_threshold = args.memory_trigger_threshold if enabled else None
+    if enabled and override.get('trigger_threshold') is not None:
         trigger_threshold = override['trigger_threshold']
 
     return {
@@ -211,16 +229,23 @@ def should_trigger_memory(confidence_score, policy):
 
 
 def build_output_filename(args, test_type):
+    file_policy = None
+    if getattr(args, "memory_task_policies", None):
+        file_policy = resolve_memory_policy({'test_type': test_type, 'category': test_type}, args)
+
     small_model_name = "baseline" if args.baseline else args.small_model_path.split('/')[-1]
     score_threshold = "None" if args.baseline else args.score_threshold
     mode = "None" if args.baseline else args.mode
     memory_threshold_tag = ""
-    if (not args.baseline) and args.memory_enable and args.memory_score_threshold is not None:
-        memory_threshold_tag = f"_mthr={args.memory_score_threshold}"
+    file_threshold = args.score_threshold if args.baseline else get_acceptance_threshold(args, file_policy)
+    file_memory_enabled = args.memory_enable if file_policy is None else file_policy.get('enabled', False)
+    if (not args.baseline) and file_memory_enabled and file_threshold != args.score_threshold:
+        memory_threshold_tag = f"_mthr={file_threshold}"
+    memory_tag = get_memory_tag(args, file_policy)
     filename = (
         f"{args.benchmark}_{test_type}_{args.large_model_path.split('/')[-1]}_"
         f"{small_model_name}_{args.batch_size}_{mode}_{score_threshold}"
-        f"{memory_threshold_tag}_{args.memory_tag}.jsonl"
+        f"{memory_threshold_tag}_{memory_tag}.jsonl"
     )
     if args.ablation_K:
         filename = filename.replace(".jsonl", f"_K={args.K}.jsonl")

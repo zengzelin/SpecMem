@@ -164,16 +164,21 @@ def summarize_print_messages(print_messages, max_chars=1600):
 
 
 def get_memory_policy(record):
-    return record.get("memory_policy", {})
+    policy = record.get("memory_policy", {})
+    return policy if isinstance(policy, dict) else {}
 
 
 
 def build_audit_record(sample_id, base_record, candidate_record):
     base_result = base_record.get("result", {})
     candidate_result = candidate_record.get("result", {})
-    candidate_logic = candidate_record.get("retrieved_logic_memories", [])
-    candidate_visual = candidate_record.get("retrieved_visual_memories", [])
+    candidate_logic = candidate_record.get("retrieved_logic_memories", []) or []
+    candidate_visual = candidate_record.get("retrieved_visual_memories", []) or []
     candidate_policy = get_memory_policy(candidate_record)
+    candidate_threshold = candidate_record.get(
+        "memory_acceptance_threshold_applied",
+        candidate_policy.get("threshold", candidate_record.get("replay_applied_threshold", None)),
+    )
 
     return {
         "sample_id": sample_id,
@@ -192,7 +197,7 @@ def build_audit_record(sample_id, base_record, candidate_record):
         "candidate_memory_task": candidate_record.get("memory_task", candidate_policy.get("task_name", "")),
         "candidate_memory_prompt_style": candidate_record.get("memory_prompt_style_applied", candidate_policy.get("prompt_style", "")),
         "candidate_memory_trigger_threshold": candidate_record.get("memory_trigger_threshold_applied", candidate_policy.get("trigger_threshold", None)),
-        "candidate_memory_threshold": candidate_record.get("memory_acceptance_threshold_applied", candidate_policy.get("threshold", None)),
+        "candidate_memory_threshold": candidate_threshold,
         "candidate_memory_triggered": candidate_record.get("memory_triggered", False),
         "candidate_memory_accept_decision": candidate_record.get("memory_accept_decision", False),
         "candidate_retrieved_logic_memories": candidate_logic,

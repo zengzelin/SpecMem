@@ -12,19 +12,29 @@ COMPACT_SPATIAL_HINTS = {
 }
 
 
+def _coerce_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def format_logic_memories(memories: list[dict], bullet_style: bool = False) -> str:
     if not memories:
         return "None."
 
     lines = []
     for idx, memory in enumerate(memories, 1):
-        guideline = memory.get("guideline", "").strip()
-        failure_mode = memory.get("failure_mode", "").strip()
+        guideline = _coerce_text(memory.get("guideline", ""))
+        failure_mode = _coerce_text(memory.get("failure_mode", ""))
+        if not guideline and not failure_mode:
+            continue
         prefix = "-" if bullet_style else f"{idx}."
         if failure_mode:
             lines.append(f"{prefix} [{failure_mode}] {guideline}")
         else:
             lines.append(f"{prefix} {guideline}")
+    if not lines:
+        return "None."
     return "\n".join(lines)
 
 
@@ -34,13 +44,17 @@ def format_visual_memories(memories: list[dict], bullet_style: bool = False) -> 
 
     lines = []
     for idx, memory in enumerate(memories, 1):
-        guideline = memory.get("guideline", "").strip()
-        visual_pattern = memory.get("visual_pattern", "").strip()
+        guideline = _coerce_text(memory.get("guideline", ""))
+        visual_pattern = _coerce_text(memory.get("visual_pattern", ""))
+        if not guideline and not visual_pattern:
+            continue
         prefix = "-" if bullet_style else f"{idx}."
         if visual_pattern:
             lines.append(f"{prefix} [pattern: {visual_pattern}] {guideline}")
         else:
             lines.append(f"{prefix} {guideline}")
+    if not lines:
+        return "None."
     return "\n".join(lines)
 
 
@@ -67,10 +81,10 @@ def _format_compact_logic_memories(memories: list[dict]) -> str:
     seen = set()
     lines = []
     for memory in memories:
-        failure_mode = memory.get("failure_mode", "").strip()
+        failure_mode = _coerce_text(memory.get("failure_mode", ""))
         guideline = COMPACT_SPATIAL_HINTS.get(
             failure_mode,
-            " ".join(memory.get("guideline", "").strip().split()),
+            " ".join(_coerce_text(memory.get("guideline", "")).split()),
         )
         if not guideline or guideline in seen:
             continue

@@ -198,7 +198,7 @@ Use the following prompt directly:
 ---
 
 You are working in:
-- `/Users/bytedance/Desktop/repos/specmem_fresh`
+- `/home/zelin/SpecMem`
 
 Please take over the current task-aware memory control and two-stage memory gating implementation.
 

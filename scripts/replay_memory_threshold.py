@@ -75,6 +75,9 @@ def infer_test_type_from_filename(path, benchmark):
 
 def parse_original_threshold_from_filename(path):
     stem = os.path.splitext(os.path.basename(path))[0]
+    memory_threshold_match = re.search(r"_mthr=(\d+(?:\.\d+)?)_mem=", stem)
+    if memory_threshold_match:
+        return float(memory_threshold_match.group(1))
     match = re.search(r"_(\d+(?:\.\d+)?)_(?:mthr=[^_]+_)?mem=", stem)
     if not match:
         return None
@@ -139,6 +142,8 @@ def estimate_generated_length(text):
 
 def get_routing_metadata(record):
     policy = record.get("memory_policy", {})
+    if not isinstance(policy, dict):
+        policy = {}
     return {
         "judge_tc": record.get("judge_tc", ""),
         "use_model": record.get("use_model", ""),
@@ -215,6 +220,9 @@ def score_record(record, benchmark, test_type):
 def build_replayed_record(record, threshold, original_threshold):
     replayed = copy.deepcopy(record)
     routing = get_routing_metadata(record)
+    replayed["memory_acceptance_threshold_applied"] = threshold
+    if isinstance(replayed.get("memory_policy"), dict):
+        replayed["memory_policy"]["threshold"] = threshold
     replayed["replay_source_use_model"] = routing["use_model"]
     replayed["replay_applied_threshold"] = threshold
     replayed["replay_original_threshold"] = original_threshold
@@ -230,6 +238,7 @@ def build_replayed_record(record, threshold, original_threshold):
 
     replay_use_model = "small" if confidence > threshold else "large"
     original_use_model = routing["use_model"]
+    replayed["memory_accept_decision"] = replay_use_model == "small"
 
     if original_use_model == "small" and replay_use_model == "large":
         raise ValueError(

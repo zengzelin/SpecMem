@@ -65,6 +65,22 @@ COUNT_FAILURE_MODES = {
 }
 
 
+def _coerce_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _coerce_concept_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    elif not isinstance(value, (list, tuple, set)):
+        value = [value]
+    return [_coerce_text(item) for item in value if _coerce_text(item)]
+
+
 def _attach_retrieval_metadata(memory: dict, score: float | None, rank: int, match_type: str) -> dict:
     enriched = copy.deepcopy(memory)
     enriched["_retrieval_score"] = score
@@ -102,9 +118,9 @@ def _question_profile(question: str) -> dict[str, bool]:
 
 def _task_aware_bonus(question: str, memory: dict) -> float:
     profile = _question_profile(question)
-    failure_mode = memory.get("failure_mode", "").strip().lower()
-    subject = memory.get("subject", "").strip().lower()
-    key_concepts = {str(item).strip().lower() for item in memory.get("key_concepts", [])}
+    failure_mode = _coerce_text(memory.get("failure_mode", "")).lower()
+    subject = _coerce_text(memory.get("subject", "")).lower()
+    key_concepts = {item.lower() for item in _coerce_concept_list(memory.get("key_concepts", []))}
 
     bonus = 0.0
     if profile["spatial_side"]:
@@ -143,10 +159,10 @@ def retrieve_logic_memories(
     for memory in memories:
         text = " ".join(
             [
-                memory.get("guideline", ""),
-                memory.get("failure_mode", ""),
-                memory.get("subject", ""),
-                " ".join(memory.get("key_concepts", [])),
+                _coerce_text(memory.get("guideline", "")),
+                _coerce_text(memory.get("failure_mode", "")),
+                _coerce_text(memory.get("subject", "")),
+                " ".join(_coerce_concept_list(memory.get("key_concepts", []))),
             ]
         )
         score = _overlap_score(question, text)
@@ -177,15 +193,15 @@ def retrieve_visual_memories(
     fallback_scored = []
 
     for memory in memories:
-        source_image_path = memory.get("source_image_path", "")
+        source_image_path = _coerce_text(memory.get("source_image_path", ""))
         if image_name and Path(source_image_path).name == image_name:
             exact_matches.append(memory)
             continue
 
         text = " ".join(
             [
-                memory.get("guideline", ""),
-                memory.get("visual_pattern", ""),
+                _coerce_text(memory.get("guideline", "")),
+                _coerce_text(memory.get("visual_pattern", "")),
             ]
         )
         score = _overlap_score(question, text)
