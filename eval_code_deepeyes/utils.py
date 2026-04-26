@@ -91,32 +91,55 @@ def token_separability(logits_t, top_k=64, eps=1e-6):
     score = (z1 - mu) / (std + eps)
     return score
 
+def aggregate_token_scores(scores, mode="min", alpha=0.6):
+    if mode == "min":
+        score = scores.min()
+        return torch.sigmoid(alpha * score)
+    if mode == "mean":
+        score = scores.mean()
+        return torch.sigmoid(alpha * score)
+    if mode == "bottom20":
+        k = max(1, int(0.2 * len(scores)))
+        score = torch.topk(scores, k=k, largest=False).values.mean()
+        return torch.sigmoid(alpha * score)
+    raise ValueError(f"Unknown aggregation mode: {mode}")
+
+
+
+def build_score_profile(logits, top_k=64, mode="min", alpha=0.6, group_size=4, tail_length=8):
+    token_scores = []
+    for t in range(logits.size(0)):
+        token_scores.append(token_separability(logits[t], top_k=top_k))
+
+    token_scores = torch.stack(token_scores)
+    token_scores_sigmoid = torch.sigmoid(alpha * token_scores)
+
+    effective_group_size = max(1, min(group_size, len(token_scores_sigmoid)))
+    group_scores = []
+    for start in range(0, len(token_scores_sigmoid), effective_group_size):
+        group_scores.append(token_scores_sigmoid[start:start + effective_group_size].mean())
+    group_scores = torch.stack(group_scores)
+
+    effective_tail_length = max(1, min(tail_length, len(token_scores_sigmoid)))
+    effective_bottom_k = max(1, int(torch.ceil(torch.tensor(0.1 * len(group_scores))).item()))
+
+    profile = {
+        "confidence_score": aggregate_token_scores(token_scores, mode=mode, alpha=alpha),
+        "tail_score": token_scores_sigmoid[-effective_tail_length:].mean(),
+        "lowest_group_score": group_scores.min(),
+        "bottom10_group_score": torch.topk(group_scores, k=effective_bottom_k, largest=False).values.mean(),
+        "token_scores": token_scores_sigmoid,
+        "group_scores": group_scores,
+        "group_size": effective_group_size,
+        "tail_length": effective_tail_length,
+    }
+    return profile
+
+
+
 def answer_separability(logits, top_k=64, mode="min", alpha=0.6):
     """
     logits: Tensor of shape [n, vocab_size]
     mode: "min" | "mean" | "bottom20"
     """
-    scores = []
-    for t in range(logits.size(0)):
-        s = token_separability(
-            logits[t],
-            top_k=top_k
-        )
-        scores.append(s)
-
-    scores = torch.stack(scores)
-
-    if mode == "min":
-        score = scores.min()
-        return torch.sigmoid(alpha * score)
-
-    elif mode == "mean":
-        score = scores.mean()
-        return torch.sigmoid(alpha * score)
-
-    elif mode == "bottom20":
-        k = max(1, int(0.2 * len(scores)))
-        score = torch.topk(scores, k=k, largest=False).values.mean()
-        return torch.sigmoid(alpha * score)
-    else:
-        raise ValueError(f"Unknown aggregation mode: {mode}")
+    return build_score_profile(logits, top_k=top_k, mode=mode, alpha=alpha)["confidence_score"]

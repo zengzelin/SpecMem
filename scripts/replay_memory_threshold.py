@@ -39,6 +39,13 @@ def parse_args():
         default=0.0025,
         help="Absolute confidence margin used for near-threshold counts.",
     )
+    parser.add_argument(
+        "--metric",
+        type=str,
+        choices=["confidence_score", "tail_score", "lowest_group_score", "bottom10_group_score"],
+        default="confidence_score",
+        help="Routing metric to replay. Falls back to confidence_score when the chosen field is missing.",
+    )
     return parser.parse_args()
 
 
@@ -140,7 +147,29 @@ def estimate_generated_length(text):
     return len(tokens)
 
 
-def get_routing_metadata(record):
+def get_metric_value(record, metric):
+    direct_value = record.get(metric)
+    if isinstance(direct_value, (int, float)):
+        return direct_value
+
+    if metric != "confidence_score":
+        raw_profile = record.get("score_profile_memory")
+        if isinstance(raw_profile, dict):
+            value = raw_profile.get(metric)
+            if isinstance(value, (int, float)):
+                return value
+
+        suffix_key = f"{metric}_memory"
+        suffix_value = record.get(suffix_key)
+        if isinstance(suffix_value, (int, float)):
+            return suffix_value
+
+    fallback = record.get("confidence_score", None)
+    return fallback if isinstance(fallback, (int, float)) else None
+
+
+
+def get_routing_metadata(record, metric):
     policy = record.get("memory_policy", {})
     if not isinstance(policy, dict):
         policy = {}
@@ -148,6 +177,8 @@ def get_routing_metadata(record):
         "judge_tc": record.get("judge_tc", ""),
         "use_model": record.get("use_model", ""),
         "confidence_score": record.get("confidence_score", None),
+        "metric_name": metric,
+        "metric_value": get_metric_value(record, metric),
         "trigger_threshold": record.get("memory_trigger_threshold_applied", policy.get("trigger_threshold")),
         "threshold": record.get("memory_acceptance_threshold_applied", policy.get("threshold")),
         "memory_triggered": record.get("memory_triggered", False),
@@ -158,8 +189,8 @@ def get_routing_metadata(record):
 
 
 
-def phase_two_candidate(record):
-    routing = get_routing_metadata(record)
+def phase_two_candidate(record, metric):
+    routing = get_routing_metadata(record, metric)
     return record.get("status") != "error" and routing["judge_tc"] == "no"
 
 
@@ -217,9 +248,9 @@ def score_record(record, benchmark, test_type):
     raise ValueError(f"Unsupported benchmark: {benchmark}")
 
 
-def build_replayed_record(record, threshold, original_threshold):
+def build_replayed_record(record, threshold, original_threshold, metric):
     replayed = copy.deepcopy(record)
-    routing = get_routing_metadata(record)
+    routing = get_routing_metadata(record, metric)
     replayed["memory_acceptance_threshold_applied"] = threshold
     if isinstance(replayed.get("memory_policy"), dict):
         replayed["memory_policy"]["threshold"] = threshold
@@ -229,14 +260,14 @@ def build_replayed_record(record, threshold, original_threshold):
     replayed["replay_route_changed"] = False
     replayed["replay_route_change"] = ""
 
-    if not phase_two_candidate(record):
+    if not phase_two_candidate(record, metric):
         return replayed
 
-    confidence = routing["confidence_score"]
-    if not isinstance(confidence, (int, float)) or confidence < 0:
+    metric_value = routing["metric_value"]
+    if not isinstance(metric_value, (int, float)) or metric_value < 0:
         return replayed
 
-    replay_use_model = "small" if confidence > threshold else "large"
+    replay_use_model = "small" if metric_value > threshold else "large"
     original_use_model = routing["use_model"]
     replayed["memory_accept_decision"] = replay_use_model == "small"
 
@@ -258,7 +289,7 @@ def build_replayed_record(record, threshold, original_threshold):
     return replayed
 
 
-def summarise_threshold(records, replayed_records, threshold, benchmark, test_type, near_margin):
+def summarise_threshold(records, replayed_records, threshold, benchmark, test_type, near_margin, metric):
     acc_values = []
     proxy_values = []
     small_cnt = 0
@@ -279,14 +310,14 @@ def summarise_threshold(records, replayed_records, threshold, benchmark, test_ty
         else:
             large_cnt += 1
 
-        original_routing = get_routing_metadata(original)
-        replay_routing = get_routing_metadata(replayed)
+        original_routing = get_routing_metadata(original, metric)
+        replay_routing = get_routing_metadata(replayed, metric)
 
-        if phase_two_candidate(original):
+        if phase_two_candidate(original, metric):
             phase_two_cnt += 1
-            confidence = original_routing["confidence_score"]
-            if isinstance(confidence, (int, float)) and confidence >= 0:
-                if abs(confidence - threshold) <= near_margin:
+            metric_value = original_routing["metric_value"]
+            if isinstance(metric_value, (int, float)) and metric_value >= 0:
+                if abs(metric_value - threshold) <= near_margin:
                     near_threshold_cnt += 1
 
         if original_routing["use_model"] != replay_routing["use_model"]:
@@ -308,8 +339,8 @@ def summarise_threshold(records, replayed_records, threshold, benchmark, test_ty
             proxy_values.append(score["proxy_acc"])
 
     evaluated_count = small_cnt + large_cnt
-    triggered_cnt = sum(1 for record in replayed_records if get_routing_metadata(record)["memory_triggered"])
-    accepted_cnt = sum(1 for record in replayed_records if get_routing_metadata(record)["memory_accept_decision"])
+    triggered_cnt = sum(1 for record in replayed_records if get_routing_metadata(record, metric)["memory_triggered"])
+    accepted_cnt = sum(1 for record in replayed_records if get_routing_metadata(record, metric)["memory_accept_decision"])
     summary = {
         "threshold": threshold,
         "acc": round(sum(acc_values) / len(acc_values), 6) if acc_values else None,
@@ -366,7 +397,7 @@ def main():
     threshold_summaries = []
     for threshold in args.thresholds:
         replayed_records = [
-            build_replayed_record(record, threshold, original_threshold) for record in records
+            build_replayed_record(record, threshold, original_threshold, args.metric) for record in records
         ]
         output_name = f"{input_stem}_replay-thr={format_threshold(threshold)}.jsonl"
         output_path = os.path.join(args.output_dir, output_name)
@@ -379,6 +410,7 @@ def main():
             benchmark=args.benchmark,
             test_type=args.test_type,
             near_margin=args.near_margin,
+            metric=args.metric,
         )
         threshold_summary["output_jsonl"] = os.path.abspath(output_path)
         threshold_summaries.append(threshold_summary)
@@ -387,6 +419,7 @@ def main():
         "input_jsonl": os.path.abspath(args.input_jsonl),
         "benchmark": args.benchmark,
         "test_type": args.test_type,
+        "metric": args.metric,
         "original_threshold": original_threshold,
         "near_margin": args.near_margin,
         "threshold_summaries": threshold_summaries,

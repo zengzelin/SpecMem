@@ -55,6 +55,10 @@ def parse_arguments():
     )
     parser.add_argument('--baseline', action='store_true')
     parser.add_argument('--mode', type=str, choices=['min', 'mean', 'bottom20', 'log'], default='min')
+    parser.add_argument('--trigger_metric', type=str, choices=['confidence_score', 'tail_score', 'lowest_group_score', 'bottom10_group_score'], default='bottom10_group_score')
+    parser.add_argument('--accept_metric', type=str, choices=['confidence_score', 'tail_score', 'lowest_group_score', 'bottom10_group_score'], default='tail_score')
+    parser.add_argument('--score_group_size', type=int, default=4)
+    parser.add_argument('--score_tail_length', type=int, default=8)
     parser.add_argument('--batch_size', type=int, default=6, help="Batch size for batch processing")
     parser.add_argument('--K', type=int, default=64)
     parser.add_argument('--ablation_K', action='store_true')
@@ -221,11 +225,22 @@ def get_acceptance_threshold(args, policy=None):
 
 
 
-def should_trigger_memory(confidence_score, policy):
+def get_score_metric(score_profile, metric_name):
+    if not isinstance(score_profile, dict):
+        return 0.0
+    value = score_profile.get(metric_name)
+    if value is None:
+        value = score_profile.get('confidence_score', 0.0)
+    return value
+
+
+
+def should_trigger_memory(score_profile, policy, args):
     trigger_threshold = policy.get('trigger_threshold')
     if trigger_threshold is None:
         return policy.get('enabled', False)
-    return policy.get('enabled', False) and confidence_score <= trigger_threshold
+    trigger_score = get_score_metric(score_profile, args.trigger_metric)
+    return policy.get('enabled', False) and trigger_score <= trigger_threshold
 
 
 def build_output_filename(args, test_type):
@@ -704,17 +719,49 @@ def _run_small_model_pass(batch_data, small_model, small_processor, args, use_me
         if logits is not None:
             if args.mode == 'log':
                 max_probs, _ = logits.softmax(dim=-1).max(dim=-1)
-                confidence_score = torch.exp(torch.mean(torch.log(max_probs))).detach().cpu().item()
+                max_probs = max_probs.detach().cpu()
+                effective_tail_length = max(1, min(args.score_tail_length, len(max_probs)))
+                effective_group_size = max(1, min(args.score_group_size, len(max_probs)))
+                group_scores = []
+                for start in range(0, len(max_probs), effective_group_size):
+                    group_scores.append(max_probs[start:start + effective_group_size].mean())
+                group_scores = torch.stack(group_scores)
+                effective_bottom_k = max(1, int(np.ceil(0.1 * len(group_scores))))
+                score_profile = {
+                    'confidence_score': torch.exp(torch.mean(torch.log(max_probs))).item(),
+                    'tail_score': max_probs[-effective_tail_length:].mean().item(),
+                    'lowest_group_score': group_scores.min().item(),
+                    'bottom10_group_score': torch.topk(group_scores, k=effective_bottom_k, largest=False).values.mean().item(),
+                }
             else:
-                confidence_score = answer_separability(logits, top_k=args.K, mode=args.mode).cpu().item()
+                raw_profile = build_score_profile(
+                    logits,
+                    top_k=args.K,
+                    mode=args.mode,
+                    group_size=args.score_group_size,
+                    tail_length=args.score_tail_length,
+                )
+                score_profile = {
+                    'confidence_score': raw_profile['confidence_score'].detach().cpu().item(),
+                    'tail_score': raw_profile['tail_score'].detach().cpu().item(),
+                    'lowest_group_score': raw_profile['lowest_group_score'].detach().cpu().item(),
+                    'bottom10_group_score': raw_profile['bottom10_group_score'].detach().cpu().item(),
+                }
         else:
-            confidence_score = 0.0
+            score_profile = {
+                'confidence_score': 0.0,
+                'tail_score': 0.0,
+                'lowest_group_score': 0.0,
+                'bottom10_group_score': 0.0,
+            }
 
+        confidence_score = score_profile['confidence_score']
         batch_data[i]['print_messages'].append({"role": "assistant", "content": output_text})
         results.append({
             'data_item': batch_data[i]['data_item'],
             'output_text': output_text,
             'confidence_score': confidence_score,
+            'score_profile': score_profile,
             'question_prompt': question_prompts[i],
             'messages': messages_list[i],
             'judge_tc': batch_data[i]['judge_tc'],
@@ -736,11 +783,12 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
     for idx, (item, result) in enumerate(zip(batch_data, base_results)):
         policy = item.get('memory_policy') or resolve_memory_policy(item['data_item'], args)
         item['memory_policy'] = policy
-        trigger_memory = should_trigger_memory(result['confidence_score'], policy)
+        trigger_memory = should_trigger_memory(result.get('score_profile', {}), policy, args)
         item['memory_triggered'] = trigger_memory
         result['memory_triggered'] = trigger_memory
         result['base_output_text'] = result['output_text']
         result['base_confidence_score'] = result['confidence_score']
+        result['base_score_profile'] = pycopy.deepcopy(result.get('score_profile', {}))
         if trigger_memory:
             rerun_items.append(item)
             rerun_indices.append(idx)
@@ -759,6 +807,7 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
             memory_result = memory_result_by_index[idx]
             memory_result['base_output_text'] = result['output_text']
             memory_result['base_confidence_score'] = result['confidence_score']
+            memory_result['base_score_profile'] = pycopy.deepcopy(result.get('score_profile', {}))
             memory_result['memory_triggered'] = True
             ordered_results.append(memory_result)
         else:
@@ -818,11 +867,13 @@ def build_result_payload(data_item, pred_answer, benchmark):
 
 
 
-def build_result_record(item, result_data, status, error, small_answer, confidence_score, use_model, generated_length, memory_enabled):
+def build_result_record(item, result_data, status, error, small_answer, confidence_score, use_model, generated_length, memory_enabled, args):
     policy = item.get('memory_policy', {})
     logic_memories = pycopy.deepcopy(item.get('retrieved_logic_memories', []))
     visual_memories = pycopy.deepcopy(item.get('retrieved_visual_memories', []))
     memory_triggered = item.get('memory_triggered', False)
+    base_score_profile = item.get('base_score_profile', {}) or {}
+    final_score_profile = item.get('score_profile', {}) or {}
     return {
         "status": status,
         "error": error,
@@ -841,8 +892,20 @@ def build_result_record(item, result_data, status, error, small_answer, confiden
         "memory_mode_applied": policy.get('memory_mode', ''),
         "memory_trigger_threshold_applied": policy.get('trigger_threshold', None),
         "memory_acceptance_threshold_applied": policy.get('threshold', None),
+        "trigger_metric": args.trigger_metric,
+        "accept_metric": args.accept_metric,
         "memory_triggered": memory_triggered,
         "memory_accept_decision": use_model == 'small' and item['judge_tc'] == 'no',
+        "score_profile_raw": base_score_profile,
+        "score_profile_memory": final_score_profile,
+        "tail_score_raw": base_score_profile.get('tail_score'),
+        "tail_score_memory": final_score_profile.get('tail_score'),
+        "lowest_group_score_raw": base_score_profile.get('lowest_group_score'),
+        "lowest_group_score_memory": final_score_profile.get('lowest_group_score'),
+        "bottom10_group_score_raw": base_score_profile.get('bottom10_group_score'),
+        "bottom10_group_score_memory": final_score_profile.get('bottom10_group_score'),
+        "tail_gain": (final_score_profile.get('tail_score') - base_score_profile.get('tail_score')) if base_score_profile.get('tail_score') is not None and final_score_profile.get('tail_score') is not None else None,
+        "bottom10_gain": (final_score_profile.get('bottom10_group_score') - base_score_profile.get('bottom10_group_score')) if base_score_profile.get('bottom10_group_score') is not None and final_score_profile.get('bottom10_group_score') is not None else None,
         "retrieved_logic_memories": logic_memories,
         "retrieved_visual_memories": visual_memories,
         "retrieved_logic_memory_count": len(logic_memories),
@@ -1046,9 +1109,12 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         item['memory_triggered'] = result.get('memory_triggered', False)
                         item['base_confidence_score'] = result.get('base_confidence_score', confidence_score)
                         item['base_small_answer'] = result.get('base_output_text', output_text)
+                        item['base_score_profile'] = pycopy.deepcopy(result.get('base_score_profile', result.get('score_profile', {})))
+                        item['score_profile'] = pycopy.deepcopy(result.get('score_profile', {}))
+                        accept_score = get_score_metric(item['score_profile'], args.accept_metric)
                         acceptance_threshold = get_acceptance_threshold(args, policy)
 
-                        if confidence_score > acceptance_threshold:
+                        if accept_score > acceptance_threshold:
                             answer_model = "small"
                             status = "success"
                             error = ""
@@ -1071,6 +1137,7 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                                 use_model=answer_model,
                                 generated_length=result['generated_length'],
                                 memory_enabled=policy['enabled'],
+                                args=args,
                             ))
                         else:
                             item['confidence_score'] = confidence_score
@@ -1109,6 +1176,7 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         use_model=answer_model,
                         generated_length=generated_length,
                         memory_enabled=policy['enabled'],
+                        args=args,
                     ))
                 
                 pbar.update(len(current_batch))
