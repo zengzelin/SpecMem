@@ -53,7 +53,17 @@
 
 ## 4. 建议运行方式
 
-### 4.1 直接运行单组 direct_attributes
+### 4.1 推荐直接运行脚本
+```bash
+bash scripts/run_stage19_da_answer_focus.sh
+```
+
+如果希望自动做 rerun audit：
+```bash
+RUN_AUDIT=1 bash scripts/run_stage19_da_answer_focus.sh
+```
+
+### 4.2 手动运行单组 direct_attributes
 ```bash
 python3 eval_code_deepeyes/SpecEyes.py \
   --large_model_path ChenShawn/DeepEyes-7B \
