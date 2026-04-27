@@ -1064,7 +1064,6 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                     policy = resolve_memory_policy(data_item, args)
                     if output_text.lower().startswith("no"):
                         # Route to the small model branch.
-                        trigger_memory = should_trigger_memory(0.0, policy)
                         small_model_batch.append({
                             'data_item': data_item,
                             'messages': messages,
@@ -1074,7 +1073,7 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                             'wh_infos': wh_infos,
                             'judge_tc': "no",
                             'memory_policy': policy,
-                            'memory_triggered': trigger_memory,
+                            'memory_triggered': False,
                         })
                         no_cnt += 1
                     else:

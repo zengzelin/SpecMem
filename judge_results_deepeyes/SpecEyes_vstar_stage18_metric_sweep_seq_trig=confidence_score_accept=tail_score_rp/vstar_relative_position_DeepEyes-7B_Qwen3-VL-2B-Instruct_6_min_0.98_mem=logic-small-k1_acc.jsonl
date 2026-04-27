@@ -1,0 +1,552 @@
+{
+    "all_acc": 82.89473684210526,
+    "small_acc": 82.66666666666667,
+    "large_acc": 100.0,
+    "small_tokens": 14.4,
+    "large_tokens": 155.0,
+    "tokens_per_second": 4.0,
+    "all_cnt": 76,
+    "small_cnt": 75,
+    "small_ratio": 98.68421052631578,
+    "large_cnt": 1,
+    "yes_cnt": 1,
+    "no_cnt": 75,
+    "error_preds": [
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_19421.jpg",
+                "question": "Is the red car on the left or right side of the police car?",
+                "answer": "The red car is on the left side of the police car.",
+                "pred_ans": "B. The red car is on the right side of the police car."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the red car on the left or right side of the police car?\n        Options: \nA. The red car is on the left side of the police car.\nB. The red car is on the right side of the police car.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The red car is on the right side of the police car."
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The red car is on the right side of the police car."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_23298.jpg",
+                "question": "Is the wheelchair on the left or right side of the lamp post?",
+                "answer": "The wheelchair is on the left side of the lamp post.",
+                "pred_ans": "B. The wheelchair is on the right side of the lamp post."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the wheelchair on the left or right side of the lamp post?\n        Options: \nA. The wheelchair is on the left side of the lamp post.\nB. The wheelchair is on the right side of the lamp post.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The wheelchair is on the right side of the lamp post."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_23264.jpg",
+                "question": "Is the blue truck on the left or right side of the white vehicle?",
+                "answer": "The blue truck is on the right side of the white vehicle.",
+                "pred_ans": "B. The blue truck is on the left side of the white vehicle."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the blue truck on the left or right side of the white vehicle?\n        Options: \nA. The blue truck is on the right side of the white vehicle.\nB. The blue truck is on the left side of the white vehicle.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The blue truck is on the left side of the white vehicle."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_24971.jpg",
+                "question": "Is the baby carriage on the left or right side of the cone?",
+                "answer": "The baby carriage is on the right side of the cone.",
+                "pred_ans": "B. The baby carriage is on the left side of the cone."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the baby carriage on the left or right side of the cone?\n        Options: \nA. The baby carriage is on the right side of the cone.\nB. The baby carriage is on the left side of the cone.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The baby carriage is on the left side of the cone."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_25678.jpg",
+                "question": "Is the red chair on the left or right side of the road?",
+                "answer": "The red chair is on the right side of the road.",
+                "pred_ans": "B. The red chair is on the left side of the road."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the red chair on the left or right side of the road?\n        Options: \nA. The red chair is on the right side of the road.\nB. The red chair is on the left side of the road.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The red chair is on the left side of the road."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_46221.jpg",
+                "question": "Is the red balloon above or below the white balloon?",
+                "answer": "The red balloon is below the white balloon.",
+                "pred_ans": "B. The red balloon is above the white balloon."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the red balloon above or below the white balloon?\n        Options: \nA. The red balloon is below the white balloon.\nB. The red balloon is above the white balloon.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The red balloon is above the white balloon."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_56362.jpg",
+                "question": "Is the bucket on the left or right side of the plunger?",
+                "answer": "The bucket is on the right side of the plunger.",
+                "pred_ans": "B. The bucket is on the left side of the plunger."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the bucket on the left or right side of the plunger?\n        Options: \nA. The bucket is on the right side of the plunger.\nB. The bucket is on the left side of the plunger.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The bucket is on the left side of the plunger."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_57960.jpg",
+                "question": "Is the motorcycle on the left or right side of the street?",
+                "answer": "The motorcycle is on the left side of the street.",
+                "pred_ans": "B. The motorcycle is on the right side of the street."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the motorcycle on the left or right side of the street?\n        Options: \nA. The motorcycle is on the left side of the street.\nB. The motorcycle is on the right side of the street.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The motorcycle is on the right side of the street."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_59351.jpg",
+                "question": "Is the shopping cart on the left or right side of the dog?",
+                "answer": "The shopping cart is on the left side of the dog.",
+                "pred_ans": "B. The shopping cart is on the right side of the dog."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the shopping cart on the left or right side of the dog?\n        Options: \nA. The shopping cart is on the left side of the dog.\nB. The shopping cart is on the right side of the dog.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The shopping cart is on the right side of the dog."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_61121.jpg",
+                "question": "Is the trash can on the left or right side of the baby carriage?",
+                "answer": "The trash can is on the right side of the baby carriage.",
+                "pred_ans": "B. The trash can is on the left side of the baby carriage."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the trash can on the left or right side of the baby carriage?\n        Options: \nA. The trash can is on the right side of the baby carriage.\nB. The trash can is on the left side of the baby carriage.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The trash can is on the left side of the baby carriage."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_5156.jpg",
+                "question": "Is the trash can on the left or right side of the black chair?",
+                "answer": "The trash can is on the left side of the black chair.",
+                "pred_ans": "B. The trash can is on the right side of the black chair."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the trash can on the left or right side of the black chair?\n        Options: \nA. The trash can is on the left side of the black chair.\nB. The trash can is on the right side of the black chair.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The trash can is on the right side of the black chair."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_51681.jpg",
+                "question": "Is the bowl on the left or right side of the faucet?",
+                "answer": "The bowl is on the right side of the faucet.",
+                "pred_ans": "B. The bowl is on the left side of the faucet."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the bowl on the left or right side of the faucet?\n        Options: \nA. The bowl is on the right side of the faucet.\nB. The bowl is on the left side of the faucet.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The bowl is on the left side of the faucet."
+                }
+            ]
+        },
+        {
+            "result": {
+                "image": "/mnt/zelin/vstar/relative_position/sa_65804.jpg",
+                "question": "Is the white truck on the left or right side of the red truck?",
+                "answer": "The white truck is on the right side of the red truck.",
+                "pred_ans": "B. The white truck is on the left side of the red truck."
+            },
+            "spec_reason_info": "",
+            "print_messages": [
+                {
+                    "role": "system",
+                    "content": "You decide based on answer reliability.\n\nAnswer \"yes\" if using a tool would significantly improve correctness or confidence of the answer.\n\nAnswer \"no\" if tools would add little or no value.\n\nOutput only \"yes\" or \"no\".\n"
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/jpeg;base64,"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Question: Is the white truck on the left or right side of the red truck?\n        Options: \nA. The white truck is on the right side of the red truck.\nB. The white truck is on the left side of the red truck.\n\n        \nWould tools significantly improve answer reliability? yes or no."
+                        }
+                    ]
+                },
+                {
+                    "role": "assistant",
+                    "content": "B. The white truck is on the left side of the red truck."
+                }
+            ]
+        }
+    ],
+    "confidence_scores": {
+        "10": 0.9736,
+        "20": 0.9786,
+        "30": 0.9807,
+        "40": 0.9828,
+        "50": 0.9844,
+        "60": 0.9862,
+        "70": 0.9885,
+        "80": 0.9899,
+        "90": 0.9908
+    },
+    "confidence_scores_wrong": [
+        0.9567102789878845,
+        0.9786362051963806,
+        0.9758610725402832,
+        0.9806659817695618,
+        0.984437882900238,
+        0.9729030132293701,
+        0.9820330739021301,
+        0.9768498539924622,
+        0.9834442138671875,
+        0.9804962277412415,
+        0.9790497422218323,
+        0.9809256196022034,
+        0.9762879610061646
+    ],
+    "confidence_scores_right": [
+        0.9924187660217285,
+        0.9843786358833313,
+        0.9590051770210266,
+        0.9852575659751892,
+        0.9821319580078125,
+        0.983730137348175,
+        0.9796161651611328,
+        0.9850311279296875,
+        0.9830478429794312,
+        0.9886212944984436,
+        0.9900980591773987,
+        0.9874607920646667,
+        0.9888363480567932,
+        0.9730603098869324,
+        0.9899097681045532,
+        0.990706741809845,
+        0.9702706933021545,
+        0.9807443022727966,
+        0.9803867936134338,
+        0.9862688183784485,
+        0.9887391328811646,
+        0.9905186295509338,
+        0.9922818541526794,
+        0.9901491403579712,
+        0.9757798910140991,
+        0.9822023510932922,
+        0.9877306818962097,
+        0.991838276386261,
+        0.9832581877708435,
+        0.9895035028457642,
+        0.9900916814804077,
+        0.986480712890625,
+        0.988923192024231,
+        0.9920393228530884,
+        0.9906586408615112,
+        0.9838545918464661,
+        0.9807144999504089,
+        0.988910436630249,
+        0.9877879023551941,
+        0.9779185652732849,
+        0.9745309948921204,
+        0.9527869820594788,
+        0.972876250743866,
+        0.9877002239227295,
+        0.9803658127784729,
+        0.9901130199432373,
+        0.9868228435516357,
+        0.9916383624076843,
+        0.9823477268218994,
+        0.9910978674888611,
+        0.985127866268158,
+        0.9908831715583801,
+        0.9708303213119507,
+        0.9889588356018066,
+        0.9855812191963196,
+        0.9838281869888306,
+        0.9861542582511902,
+        0.9782437086105347,
+        0.9857821464538574,
+        0.9810075163841248,
+        0.9839916825294495,
+        0.9926016926765442
+    ]
+}
