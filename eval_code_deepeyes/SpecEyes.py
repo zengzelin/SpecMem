@@ -72,7 +72,7 @@ def parse_arguments():
     parser.add_argument(
         '--memory_prompt_style',
         type=str,
-        choices=['default', 'compact_spatial', 'compact_general', 'empty_scaffold', 'no_memory'],
+        choices=['default', 'compact_spatial', 'compact_general', 'answer_focus', 'empty_scaffold', 'no_memory'],
         default='default',
     )
     parser.add_argument(

@@ -1,0 +1,45 @@
+{
+  "input_jsonl": "/Users/bytedance/Desktop/repos/specmem_fresh/eval_results_deepeyes/SpecEyes_vstar_stage18_metric_sweep_seq_trig=confidence_score_accept=confidence_score_rp/vstar_relative_position_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mem=logic-small-k1.jsonl",
+  "task": "relative_position",
+  "total_records": 76,
+  "phase_two_candidates": 75,
+  "triggered_count": 3,
+  "accepted_after_trigger": 0,
+  "accepted_after_trigger_ratio": 0.0,
+  "answer_changed_count": 1,
+  "answer_changed_ratio": 0.333333,
+  "accepted_changed_count": 0,
+  "accepted_changed_ratio": 0.0,
+  "raw_wrong_to_memory_correct": 1,
+  "raw_correct_to_memory_wrong": 0,
+  "raw_wrong_to_memory_wrong": 0,
+  "raw_correct_to_memory_correct": 2,
+  "corrected_count": 1,
+  "harmed_count": 0,
+  "changed_but_still_wrong_count": 0,
+  "unchanged_count": 2,
+  "tail_gain_corrected": {
+    "count": 1,
+    "mean": -0.000264,
+    "min": -0.000264,
+    "max": -0.000264
+  },
+  "tail_gain_harmed": {
+    "count": 0,
+    "mean": null,
+    "min": null,
+    "max": null
+  },
+  "bottom10_gain_corrected": {
+    "count": 1,
+    "mean": -0.001467,
+    "min": -0.001467,
+    "max": -0.001467
+  },
+  "bottom10_gain_harmed": {
+    "count": 0,
+    "mean": null,
+    "min": null,
+    "max": null
+  }
+}

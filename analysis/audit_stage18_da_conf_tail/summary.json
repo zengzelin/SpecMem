@@ -1,0 +1,45 @@
+{
+  "input_jsonl": "/Users/bytedance/Desktop/repos/specmem_fresh/eval_results_deepeyes/SpecEyes_vstar_stage18_metric_sweep_seq_trig=confidence_score_accept=tail_score_da/vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mem=logic-small-k1.jsonl",
+  "task": "direct_attributes",
+  "total_records": 115,
+  "phase_two_candidates": 106,
+  "triggered_count": 26,
+  "accepted_after_trigger": 25,
+  "accepted_after_trigger_ratio": 0.961538,
+  "answer_changed_count": 6,
+  "answer_changed_ratio": 0.230769,
+  "accepted_changed_count": 6,
+  "accepted_changed_ratio": 0.24,
+  "raw_wrong_to_memory_correct": 1,
+  "raw_correct_to_memory_wrong": 4,
+  "raw_wrong_to_memory_wrong": 15,
+  "raw_correct_to_memory_correct": 6,
+  "corrected_count": 1,
+  "harmed_count": 4,
+  "changed_but_still_wrong_count": 1,
+  "unchanged_count": 20,
+  "tail_gain_corrected": {
+    "count": 1,
+    "mean": -0.000154,
+    "min": -0.000154,
+    "max": -0.000154
+  },
+  "tail_gain_harmed": {
+    "count": 4,
+    "mean": -0.000169,
+    "min": -0.000522,
+    "max": 9e-06
+  },
+  "bottom10_gain_corrected": {
+    "count": 1,
+    "mean": -0.005947,
+    "min": -0.005947,
+    "max": -0.005947
+  },
+  "bottom10_gain_harmed": {
+    "count": 4,
+    "mean": -0.004859,
+    "min": -0.006129,
+    "max": -0.003055
+  }
+}

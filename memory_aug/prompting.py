@@ -120,7 +120,22 @@ def augment_small_model_prompt(
             )
             return _append_sections(question_prompt, sections)
 
-    if style == "empty_scaffold":
+    if style == "answer_focus":
+        if visual_memories:
+            sections.append(
+                "Visual memory hints for the final answer:\n"
+                f"{format_visual_memories(visual_memories, bullet_style=True)}"
+            )
+        if logic_memories:
+            sections.append(
+                "Logical memory hints for the final answer:\n"
+                f"{format_logic_memories(logic_memories, bullet_style=True)}"
+            )
+        sections.append(
+            "Re-evaluate only the final answer. Keep the response minimal and answer-centric. "
+            "If this is multiple choice, output only the best option and its matching answer text."
+        )
+    elif style == "empty_scaffold":
         sections.append("Relevant visual warnings from past failures:\nNone.")
         sections.append("Relevant logical guidelines from past failures:\nNone.")
     elif style == "compact_general":
