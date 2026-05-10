@@ -1,0 +1,48 @@
+{
+  "input_jsonl": "/home/zelin/SpecMem/eval_results_deepeyes/SpecEyes_vstar_stage23_selector_small_keep/vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mem=logic-small-k1-answer_focus.jsonl",
+  "task": "direct_attributes",
+  "total_records": 115,
+  "phase_two_candidates": 106,
+  "score_triggered_count": 26,
+  "triggered_count": 26,
+  "retrieval_gate_blocked_count": 0,
+  "retrieval_gate_blocked_ratio": 0.0,
+  "accepted_after_trigger": 5,
+  "accepted_after_trigger_ratio": 0.192308,
+  "answer_changed_count": 14,
+  "answer_changed_ratio": 0.538462,
+  "accepted_changed_count": 2,
+  "accepted_changed_ratio": 0.4,
+  "raw_wrong_to_memory_correct": 11,
+  "raw_correct_to_memory_wrong": 2,
+  "raw_wrong_to_memory_wrong": 5,
+  "raw_correct_to_memory_correct": 8,
+  "corrected_count": 11,
+  "harmed_count": 2,
+  "changed_but_still_wrong_count": 1,
+  "unchanged_count": 12,
+  "tail_gain_corrected": {
+    "count": 11,
+    "mean": -1.4e-05,
+    "min": -0.000356,
+    "max": 0.000382
+  },
+  "tail_gain_harmed": {
+    "count": 2,
+    "mean": -0.000308,
+    "min": -0.000531,
+    "max": -8.5e-05
+  },
+  "bottom10_gain_corrected": {
+    "count": 11,
+    "mean": 0.000227,
+    "min": -0.002111,
+    "max": 0.003256
+  },
+  "bottom10_gain_harmed": {
+    "count": 2,
+    "mean": -0.001353,
+    "min": -0.001353,
+    "max": -0.001352
+  }
+}

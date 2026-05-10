@@ -163,6 +163,8 @@ def main():
     records = load_jsonl(args.input_jsonl)
 
     triggered_rows = []
+    score_triggered_rows = []
+    retrieval_gate_blocked_rows = []
     accepted_rows = []
     corrected_rows = []
     harmed_rows = []
@@ -176,7 +178,9 @@ def main():
 
     total_records = 0
     phase_two_candidates = 0
+    score_triggered_count = 0
     triggered_count = 0
+    retrieval_gate_blocked_count = 0
     accepted_after_trigger = 0
     answer_changed_count = 0
     accepted_changed_count = 0
@@ -194,10 +198,12 @@ def main():
         if record.get("judge_tc") == "no":
             phase_two_candidates += 1
 
-        if not record.get("memory_triggered", False):
-            continue
+        score_triggered = bool(record.get("memory_score_triggered", record.get("memory_triggered", False)))
+        if score_triggered:
+            score_triggered_count += 1
 
-        triggered_count += 1
+        if not score_triggered:
+            continue
 
         result = record.get("result", {})
         gold_answer = result.get("answer", "")
@@ -207,6 +213,8 @@ def main():
         memory_correct = is_correct_answer(gold_answer, memory_answer)
         answer_changed = normalize_answer(raw_answer) != normalize_answer(memory_answer)
         accepted = bool(record.get("memory_accept_decision", False))
+        memory_triggered = bool(record.get("memory_triggered", False))
+        trigger_block_reason = record.get("memory_trigger_block_reason", "")
 
         row = {
             "sample_index": idx,
@@ -217,11 +225,17 @@ def main():
             "memory_answer": memory_answer,
             "raw_correct": raw_correct,
             "memory_correct": memory_correct,
+            "score_triggered": score_triggered,
+            "memory_triggered": memory_triggered,
+            "retrieval_gate_passed": record.get("memory_retrieval_gate_passed"),
+            "trigger_block_reason": trigger_block_reason,
             "answer_changed": answer_changed,
             "accepted_after_trigger": accepted,
             "use_model": record.get("use_model", ""),
             "trigger_metric": record.get("trigger_metric", "confidence_score"),
             "accept_metric": record.get("accept_metric", "confidence_score"),
+            "memory_top1_retrieval_score": record.get("memory_top1_retrieval_score"),
+            "memory_retrieval_min_score_applied": record.get("memory_retrieval_min_score_applied"),
             "tail_score_raw": record.get("tail_score_raw"),
             "tail_score_memory": record.get("tail_score_memory"),
             "bottom10_group_score_raw": record.get("bottom10_group_score_raw"),
@@ -231,6 +245,15 @@ def main():
             "small_answer": record.get("small_answer", ""),
             "base_small_answer": record.get("base_small_answer", ""),
         }
+        score_triggered_rows.append(row)
+
+        if not memory_triggered:
+            if trigger_block_reason == "retrieval_gate":
+                retrieval_gate_blocked_count += 1
+                retrieval_gate_blocked_rows.append(row)
+            continue
+
+        triggered_count += 1
         triggered_rows.append(row)
 
         if answer_changed:
@@ -267,7 +290,10 @@ def main():
         "task": args.task,
         "total_records": total_records,
         "phase_two_candidates": phase_two_candidates,
+        "score_triggered_count": score_triggered_count,
         "triggered_count": triggered_count,
+        "retrieval_gate_blocked_count": retrieval_gate_blocked_count,
+        "retrieval_gate_blocked_ratio": round(retrieval_gate_blocked_count / score_triggered_count, 6) if score_triggered_count else 0.0,
         "accepted_after_trigger": accepted_after_trigger,
         "accepted_after_trigger_ratio": round(accepted_after_trigger / triggered_count, 6) if triggered_count else 0.0,
         "answer_changed_count": answer_changed_count,
@@ -289,7 +315,9 @@ def main():
     }
 
     write_json(os.path.join(args.output_dir, "summary.json"), summary)
+    write_jsonl(os.path.join(args.output_dir, "score_triggered_samples.jsonl"), score_triggered_rows)
     write_jsonl(os.path.join(args.output_dir, "triggered_samples.jsonl"), triggered_rows)
+    write_jsonl(os.path.join(args.output_dir, "retrieval_gate_blocked.jsonl"), retrieval_gate_blocked_rows)
     write_jsonl(os.path.join(args.output_dir, "accepted_after_trigger.jsonl"), accepted_rows)
     write_jsonl(os.path.join(args.output_dir, "corrected.jsonl"), corrected_rows)
     write_jsonl(os.path.join(args.output_dir, "harmed.jsonl"), harmed_rows)

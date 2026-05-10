@@ -8,6 +8,7 @@ import time
 import copy
 import numpy as np
 import traceback
+import re
 import torch
 from pathlib import Path
 from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor, Qwen2_5_VLForConditionalGeneration, AutoProcessor
@@ -87,6 +88,58 @@ def parse_arguments():
         choices=['default', 'task_aware'],
         default='default',
     )
+    parser.add_argument(
+        '--memory_retrieval_min_score',
+        type=float,
+        default=None,
+        help='Optional minimum top-1 logic retrieval score required before rerunning the small model with memory.',
+    )
+    parser.add_argument(
+        '--memory_accept_policy',
+        type=str,
+        choices=['threshold', 'triggered_multisignal', 'selector_ab'],
+        default='threshold',
+        help='Acceptance policy for triggered memory reruns.',
+    )
+    parser.add_argument(
+        '--memory_selector_model',
+        type=str,
+        choices=['large', 'small'],
+        default='large',
+        help='Model used to select between base and memory answers when memory_accept_policy=selector_ab.',
+    )
+    parser.add_argument(
+        '--memory_selector_base_action',
+        type=str,
+        choices=['keep_base', 'fallback_large'],
+        default='keep_base',
+        help='What to do when the selector prefers the base answer.',
+    )
+    parser.add_argument(
+        '--memory_accept_min_confidence',
+        type=float,
+        default=0.0,
+        help='Minimum rerun confidence used by triggered_multisignal acceptance.',
+    )
+    parser.add_argument(
+        '--memory_accept_min_delta_conf',
+        type=float,
+        default=-1.0,
+        help='Minimum (memory_confidence - base_confidence) used by triggered_multisignal acceptance.',
+    )
+    parser.add_argument(
+        '--memory_accept_min_retrieval_score',
+        type=float,
+        default=0.0,
+        help='Minimum top-1 logic retrieval score used by triggered_multisignal acceptance.',
+    )
+    parser.add_argument(
+        '--memory_accept_answer_change',
+        type=str,
+        choices=['any', 'changed', 'unchanged'],
+        default='any',
+        help='Answer-change constraint used by triggered_multisignal acceptance.',
+    )
     # v*
     parser.add_argument('--vstar_path', type=str, default="data/vstar")
     # hr-bench
@@ -111,6 +164,7 @@ def get_memory_tag(args, policy=None):
     memory_mode = args.memory_mode
     logic_top_k = args.logic_top_k
     visual_top_k = args.visual_top_k
+    retrieval_min_score = getattr(args, "memory_retrieval_min_score", None)
 
     if policy is not None:
         enabled = policy.get('enabled', False)
@@ -119,6 +173,7 @@ def get_memory_tag(args, policy=None):
         memory_mode = policy.get('memory_mode') or memory_mode
         logic_top_k = policy.get('logic_top_k', logic_top_k)
         visual_top_k = policy.get('visual_top_k', visual_top_k)
+        retrieval_min_score = policy.get('retrieval_min_score', retrieval_min_score)
 
     if not enabled:
         return "mem=off"
@@ -130,11 +185,14 @@ def get_memory_tag(args, policy=None):
     retrieval_style_suffix = ""
     if retrieval_style != "default":
         retrieval_style_suffix = f"-{retrieval_style}"
+    retrieval_gate_suffix = ""
+    if retrieval_min_score is not None:
+        retrieval_gate_suffix = f"-rmin{retrieval_min_score:g}"
     if memory_mode == 'logic_only':
-        return f"mem=logic-{prompt_scope}-k{logic_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+        return f"mem=logic-{prompt_scope}-k{logic_top_k}{prompt_style_suffix}{retrieval_style_suffix}{retrieval_gate_suffix}"
     if memory_mode == 'visual_only':
-        return f"mem=visual-{prompt_scope}-k{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
-    return f"mem=dual-{prompt_scope}-l{logic_top_k}-v{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}"
+        return f"mem=visual-{prompt_scope}-k{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}{retrieval_gate_suffix}"
+    return f"mem=dual-{prompt_scope}-l{logic_top_k}-v{visual_top_k}{prompt_style_suffix}{retrieval_style_suffix}{retrieval_gate_suffix}"
 
 
 def parse_memory_task_policy(policy_str):
@@ -212,6 +270,7 @@ def resolve_memory_policy(data_item, args):
         'visual_top_k': args.visual_top_k,
         'memory_mode': args.memory_mode,
         'retrieval_style': args.memory_retrieval_style,
+        'retrieval_min_score': args.memory_retrieval_min_score,
     }
 
 
@@ -234,6 +293,83 @@ def get_score_metric(score_profile, metric_name):
     return value
 
 
+def extract_answer_text(text):
+    text = str(text or "").strip()
+    if "<answer>" in text and "</answer>" in text:
+        return text.split("<answer>", 1)[1].split("</answer>", 1)[0].strip()
+    return text
+
+
+def normalize_answer(text):
+    text = str(text or "").strip().lower()
+    if not text:
+        return ""
+
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip(" \n\t\r.,;:!?\"'")
+
+    if text.startswith("yes"):
+        return "yes"
+    if text.startswith("no"):
+        return "no"
+
+    letter_match = re.fullmatch(r"([a-f])(?:[\.\)])?", text)
+    if letter_match:
+        return letter_match.group(1)
+
+    inline_letter_match = re.search(r"\b([a-f])(?:[\.\)])\b", text)
+    if inline_letter_match:
+        return inline_letter_match.group(1)
+
+    return text
+
+
+def get_top1_logic_retrieval_score(item):
+    memories = item.get('retrieved_logic_memories') or []
+    if not memories:
+        return None
+    score = memories[0].get('_retrieval_score')
+    return score if isinstance(score, (int, float)) else None
+
+
+def should_accept_small_result(item, output_text, confidence_score, accept_score, acceptance_threshold, args):
+    if args.memory_accept_policy == 'selector_ab':
+        return False
+
+    if not item.get('memory_triggered', False) or args.memory_accept_policy == 'threshold':
+        return accept_score > acceptance_threshold
+
+    if confidence_score < args.memory_accept_min_confidence:
+        return False
+
+    base_confidence = item.get('base_confidence_score', confidence_score)
+    delta_confidence = confidence_score - base_confidence
+    if delta_confidence < args.memory_accept_min_delta_conf:
+        return False
+
+    top1_retrieval_score = get_top1_logic_retrieval_score(item)
+    if top1_retrieval_score is None or top1_retrieval_score < args.memory_accept_min_retrieval_score:
+        return False
+
+    base_answer = extract_answer_text(item.get('base_small_answer', ''))
+    rerun_answer = extract_answer_text(output_text)
+    answer_changed = normalize_answer(base_answer) != normalize_answer(rerun_answer)
+
+    if args.memory_accept_answer_change == 'changed' and not answer_changed:
+        return False
+    if args.memory_accept_answer_change == 'unchanged' and answer_changed:
+        return False
+
+    return True
+
+
+def should_run_selector(item, rerun_output_text):
+    if not item.get('memory_triggered', False):
+        return False
+    base_answer = extract_answer_text(item.get('base_small_answer', ''))
+    rerun_answer = extract_answer_text(rerun_output_text)
+    return normalize_answer(base_answer) != normalize_answer(rerun_answer)
+
 
 def should_trigger_memory(score_profile, policy, args):
     trigger_threshold = policy.get('trigger_threshold')
@@ -241,6 +377,18 @@ def should_trigger_memory(score_profile, policy, args):
         return policy.get('enabled', False)
     trigger_score = get_score_metric(score_profile, args.trigger_metric)
     return policy.get('enabled', False) and trigger_score <= trigger_threshold
+
+
+def evaluate_memory_retrieval_gate(item, args):
+    logic_memories, visual_memories = get_retrieved_memories_for_item(item, args)
+    if args.memory_retrieval_min_score is None:
+        item['memory_retrieval_gate_passed'] = True
+        return True, logic_memories, visual_memories
+
+    top1_retrieval_score = get_top1_logic_retrieval_score(item)
+    gate_passed = top1_retrieval_score is not None and top1_retrieval_score >= args.memory_retrieval_min_score
+    item['memory_retrieval_gate_passed'] = gate_passed
+    return gate_passed, logic_memories, visual_memories
 
 
 def build_output_filename(args, test_type):
@@ -267,6 +415,20 @@ def build_output_filename(args, test_type):
     if args.ablation_phaseI_Ms:
         filename = filename.replace(".jsonl", "_PhaseIMs.jsonl")
     return filename
+
+
+def build_realtime_max_memory_map(reserve_gib=2):
+    if not torch.cuda.is_available():
+        return None
+
+    max_memory = {}
+    for device_idx in range(torch.cuda.device_count()):
+        free_bytes, _ = torch.cuda.mem_get_info(device_idx)
+        free_gib = free_bytes / (1024 ** 3)
+        usable_gib = max(4, int(free_gib - reserve_gib))
+        max_memory[device_idx] = f"{usable_gib}GiB"
+
+    return max_memory
 
 def handle_exception(e, error_prefix):
     full_error_info = traceback.format_exc()
@@ -519,6 +681,17 @@ def prepare_messages_to_answer(messages_to_answer, question_prompt, args):
 
     return messages_to_answer
 
+
+def build_selector_prompt(question_prompt, base_answer, memory_answer):
+    return (
+        f"{question_prompt.strip()}\n\n"
+        "Two candidate answers are available.\n"
+        f"A. {base_answer.strip()}\n"
+        f"B. {memory_answer.strip()}\n\n"
+        "Choose the more accurate final answer based on the image and question.\n"
+        "Output only A or B."
+    )
+
 def process_messages_to_tc(messages, print_messages, response_message, images_pil, wh_infos):
     action_list = response_message.split("<tool_call>")[1].split("</tool_call>")[0].strip()
     # action_list = eval(action_list)
@@ -688,6 +861,35 @@ def get_batch_response(messages_list, model, processor, image_patch_size=14, ret
     
     return output_texts, logits_list
 
+
+def get_batch_short_response_with_retry(messages_list, model, processor, args, batch_label="router"):
+    try:
+        output_texts, _ = get_batch_response(
+            messages_list,
+            model,
+            processor,
+            short_answer=True,
+        )
+        return output_texts
+    except torch.OutOfMemoryError:
+        safe_cuda_empty_cache()
+        if len(messages_list) <= 1:
+            raise
+        split_idx = max(1, len(messages_list) // 2)
+        if args.verbose:
+            print(
+                f"{batch_label} batch OOM on {len(messages_list)} samples. "
+                f"Retrying with micro-batches of {split_idx} and {len(messages_list) - split_idx}."
+            )
+        left_outputs = get_batch_short_response_with_retry(
+            messages_list[:split_idx], model, processor, args, batch_label=batch_label
+        )
+        safe_cuda_empty_cache()
+        right_outputs = get_batch_short_response_with_retry(
+            messages_list[split_idx:], model, processor, args, batch_label=batch_label
+        )
+        return left_outputs + right_outputs
+
 def _run_small_model_pass(batch_data, small_model, small_processor, args, use_memory):
     messages_list = []
     question_prompts = []
@@ -777,23 +979,40 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
     """Run the small model on a batch and collect confidence scores."""
     base_results = _run_small_model_pass(batch_data, small_model, small_processor, args, use_memory=False)
 
-    final_results = []
     rerun_items = []
     rerun_indices = []
     for idx, (item, result) in enumerate(zip(batch_data, base_results)):
         policy = item.get('memory_policy') or resolve_memory_policy(item['data_item'], args)
         item['memory_policy'] = policy
-        trigger_memory = should_trigger_memory(result.get('score_profile', {}), policy, args)
+        score_triggered = should_trigger_memory(result.get('score_profile', {}), policy, args)
+        item['memory_score_triggered'] = score_triggered
+        result['memory_score_triggered'] = score_triggered
+        result['memory_retrieval_gate_passed'] = None
+
+        if not policy.get('enabled', False):
+            trigger_memory = False
+            item['memory_trigger_block_reason'] = 'memory_disabled'
+        elif not score_triggered:
+            trigger_memory = False
+            item['memory_trigger_block_reason'] = 'score_threshold'
+        else:
+            gate_passed, logic_memories, visual_memories = evaluate_memory_retrieval_gate(item, args)
+            result['retrieved_logic_memories'] = pycopy.deepcopy(logic_memories)
+            result['retrieved_visual_memories'] = pycopy.deepcopy(visual_memories)
+            result['memory_retrieval_gate_passed'] = gate_passed
+            trigger_memory = gate_passed
+            item['memory_trigger_block_reason'] = '' if gate_passed else 'retrieval_gate'
+
         item['memory_triggered'] = trigger_memory
+        item['memory_retrieval_gate_passed'] = result.get('memory_retrieval_gate_passed')
         result['memory_triggered'] = trigger_memory
+        result['memory_trigger_block_reason'] = item.get('memory_trigger_block_reason', '')
         result['base_output_text'] = result['output_text']
         result['base_confidence_score'] = result['confidence_score']
         result['base_score_profile'] = pycopy.deepcopy(result.get('score_profile', {}))
         if trigger_memory:
             rerun_items.append(item)
             rerun_indices.append(idx)
-        else:
-            final_results.append(result)
 
     if rerun_items:
         memory_results = _run_small_model_pass(rerun_items, small_model, small_processor, args, use_memory=True)
@@ -808,6 +1027,9 @@ def _process_batch_small_model_once(batch_data, small_model, small_processor, ar
             memory_result['base_output_text'] = result['output_text']
             memory_result['base_confidence_score'] = result['confidence_score']
             memory_result['base_score_profile'] = pycopy.deepcopy(result.get('score_profile', {}))
+            memory_result['memory_score_triggered'] = True
+            memory_result['memory_retrieval_gate_passed'] = True
+            memory_result['memory_trigger_block_reason'] = ''
             memory_result['memory_triggered'] = True
             ordered_results.append(memory_result)
         else:
@@ -872,6 +1094,7 @@ def build_result_record(item, result_data, status, error, small_answer, confiden
     logic_memories = pycopy.deepcopy(item.get('retrieved_logic_memories', []))
     visual_memories = pycopy.deepcopy(item.get('retrieved_visual_memories', []))
     memory_triggered = item.get('memory_triggered', False)
+    memory_score_triggered = item.get('memory_score_triggered', memory_triggered)
     base_score_profile = item.get('base_score_profile', {}) or {}
     final_score_profile = item.get('score_profile', {}) or {}
     return {
@@ -892,10 +1115,29 @@ def build_result_record(item, result_data, status, error, small_answer, confiden
         "memory_mode_applied": policy.get('memory_mode', ''),
         "memory_trigger_threshold_applied": policy.get('trigger_threshold', None),
         "memory_acceptance_threshold_applied": policy.get('threshold', None),
+        "memory_retrieval_min_score_applied": policy.get('retrieval_min_score', None),
+        "memory_accept_policy_mode": args.memory_accept_policy,
+        "memory_selector_model": args.memory_selector_model,
+        "memory_selector_base_action": args.memory_selector_base_action,
+        "memory_selector_choice": item.get('memory_selector_choice', ''),
+        "memory_selector_output": item.get('memory_selector_output', ''),
+        "memory_selector_selected_answer": item.get('memory_selector_selected_answer', ''),
+        "memory_accept_min_confidence_applied": args.memory_accept_min_confidence,
+        "memory_accept_min_delta_conf_applied": args.memory_accept_min_delta_conf,
+        "memory_accept_min_retrieval_score_applied": args.memory_accept_min_retrieval_score,
+        "memory_accept_answer_change_applied": args.memory_accept_answer_change,
+        "memory_top1_retrieval_score": get_top1_logic_retrieval_score(item),
         "trigger_metric": args.trigger_metric,
         "accept_metric": args.accept_metric,
+        "memory_score_triggered": memory_score_triggered,
         "memory_triggered": memory_triggered,
+        "memory_retrieval_gate_passed": item.get('memory_retrieval_gate_passed'),
+        "memory_trigger_block_reason": item.get('memory_trigger_block_reason', ''),
+        "memory_prompt_injected": memory_triggered,
         "memory_accept_decision": use_model == 'small' and item['judge_tc'] == 'no',
+        "trigger_metric_value_raw": get_score_metric(base_score_profile, args.trigger_metric),
+        "accept_metric_value_raw": get_score_metric(base_score_profile, args.accept_metric),
+        "accept_metric_value_memory": get_score_metric(final_score_profile, args.accept_metric),
         "score_profile_raw": base_score_profile,
         "score_profile_memory": final_score_profile,
         "tail_score_raw": base_score_profile.get('tail_score'),
@@ -985,6 +1227,39 @@ def process_single_large_model(item, large_model, large_processor, args):
 
     return output_text, generated_length, status, error
 
+
+def run_selector_for_item(item, small_model, small_processor, large_model, large_processor, args):
+    base_answer = extract_answer_text(item.get('base_small_answer', ''))
+    memory_answer = extract_answer_text(item.get('small_draft_answer', ''))
+    selector_prompt = build_selector_prompt(item['question_prompt'], base_answer, memory_answer)
+
+    selector_messages = copy.deepcopy(item['messages'])
+    selector_messages = prepare_messages_to_answer(selector_messages, selector_prompt, args)
+
+    selector_model = large_model if args.memory_selector_model == 'large' else small_model
+    selector_processor = large_processor if args.memory_selector_model == 'large' else small_processor
+
+    selector_outputs = get_batch_short_response_with_retry(
+        [selector_messages],
+        selector_model,
+        selector_processor,
+        args,
+        batch_label="selector",
+    )
+    selector_output = selector_outputs[0]
+    selector_choice = normalize_answer(selector_output)
+    if selector_choice.startswith('b'):
+        return {
+            'choice': 'memory',
+            'raw_choice': selector_output,
+            'selected_answer': memory_answer,
+        }
+    return {
+        'choice': 'base',
+        'raw_choice': selector_output,
+        'selected_answer': base_answer,
+    }
+
 def process_test_type(small_model, small_processor, large_model, large_processor, test_type, data_generator, args):
     if args.benchmark == 'vstar':
         test_path = os.path.join(args.vstar_path, test_type)
@@ -1048,9 +1323,21 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                     batch_output_texts = ["yes"] * len(current_batch)
                 else:
                     if args.ablation_phaseI_Ms:
-                        batch_output_texts, _ = get_batch_response(batch_messages, small_model, small_processor, short_answer=True)
+                        batch_output_texts = get_batch_short_response_with_retry(
+                            batch_messages,
+                            small_model,
+                            small_processor,
+                            args,
+                            batch_label="Phase-I small-router",
+                        )
                     else:
-                        batch_output_texts, _ = get_batch_response(batch_messages, large_model, large_processor, short_answer=True)
+                        batch_output_texts = get_batch_short_response_with_retry(
+                            batch_messages,
+                            large_model,
+                            large_processor,
+                            args,
+                            batch_label="Phase-I large-router",
+                        )
 
                 safe_cuda_empty_cache()
                 # Split samples by the Phase-I decision.
@@ -1105,7 +1392,10 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         judge_tc = result['judge_tc']
                         policy = item.get('memory_policy') or resolve_memory_policy(data_item, args)
                         item['memory_policy'] = policy
+                        item['memory_score_triggered'] = result.get('memory_score_triggered', False)
                         item['memory_triggered'] = result.get('memory_triggered', False)
+                        item['memory_retrieval_gate_passed'] = result.get('memory_retrieval_gate_passed')
+                        item['memory_trigger_block_reason'] = result.get('memory_trigger_block_reason', '')
                         item['base_confidence_score'] = result.get('base_confidence_score', confidence_score)
                         item['base_small_answer'] = result.get('base_output_text', output_text)
                         item['base_score_profile'] = pycopy.deepcopy(result.get('base_score_profile', result.get('score_profile', {})))
@@ -1113,12 +1403,67 @@ def process_test_type(small_model, small_processor, large_model, large_processor
                         accept_score = get_score_metric(item['score_profile'], args.accept_metric)
                         acceptance_threshold = get_acceptance_threshold(args, policy)
 
-                        if accept_score > acceptance_threshold:
+                        selector_result = None
+                        if args.memory_accept_policy == 'selector_ab' and should_run_selector(item, output_text):
+                            item['small_draft_answer'] = output_text
+                            selector_result = run_selector_for_item(
+                                item=item,
+                                small_model=small_model,
+                                small_processor=small_processor,
+                                large_model=large_model,
+                                large_processor=large_processor,
+                                args=args,
+                            )
+                            item['memory_selector_choice'] = selector_result['choice']
+                            item['memory_selector_output'] = selector_result['raw_choice']
+                            item['memory_selector_selected_answer'] = selector_result['selected_answer']
+                        else:
+                            item['memory_selector_choice'] = ''
+                            item['memory_selector_output'] = ''
+                            item['memory_selector_selected_answer'] = ''
+
+                        accept_small = should_accept_small_result(
+                            item=item,
+                            output_text=output_text,
+                            confidence_score=confidence_score,
+                            accept_score=accept_score,
+                            acceptance_threshold=acceptance_threshold,
+                            args=args,
+                        )
+
+                        if args.memory_accept_policy == 'selector_ab':
+                            accept_small = bool(selector_result and selector_result['choice'] == 'memory')
+                            if selector_result and selector_result['choice'] == 'base' and args.memory_selector_base_action == 'keep_base':
+                                answer_model = "small"
+                                status = "success"
+                                error = ""
+                                pred_answer = selector_result['selected_answer']
+
+                                item['retrieved_logic_memories'] = result.get('retrieved_logic_memories', [])
+                                item['retrieved_visual_memories'] = result.get('retrieved_visual_memories', [])
+                                result_data = build_result_payload(data_item, pred_answer, args.benchmark)
+                                results.append(build_result_record(
+                                    item=item,
+                                    result_data=result_data,
+                                    status=status,
+                                    error=error,
+                                    small_answer=item.get('base_small_answer', output_text),
+                                    confidence_score=item.get('base_confidence_score', confidence_score),
+                                    use_model=answer_model,
+                                    generated_length=result['generated_length'],
+                                    memory_enabled=policy['enabled'],
+                                    args=args,
+                                ))
+                                continue
+
+                        if accept_small:
                             answer_model = "small"
                             status = "success"
                             error = ""
 
-                            if '</answer>' in output_text and '<answer>' in output_text:
+                            if selector_result and selector_result.get('selected_answer'):
+                                pred_answer = selector_result['selected_answer']
+                            elif '</answer>' in output_text and '<answer>' in output_text:
                                 pred_answer = output_text.split('<answer>')[1].split('</answer>')[0].strip()
                             else:
                                 pred_answer = output_text
@@ -1221,20 +1566,26 @@ def process_test_type(small_model, small_processor, large_model, large_processor
 def load_models(args):
     if args.verbose:
         print(f"Loading small model: {args.small_model_path}")
+    small_model_load_kwargs = {
+        "dtype": torch.bfloat16,
+        "attn_implementation": "flash_attention_2",
+        "device_map": "auto",
+    }
+    small_max_memory = build_realtime_max_memory_map()
+    if small_max_memory is not None:
+        small_model_load_kwargs["max_memory"] = small_max_memory
+        if args.verbose:
+            print(f"Using realtime max_memory map for small model: {small_max_memory}")
     if "Qwen3" in args.small_model_path:
         small_model = Qwen3VLForConditionalGeneration.from_pretrained(
             args.small_model_path,
-            dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            device_map="auto",
+            **small_model_load_kwargs,
         )
         small_processor = Qwen3VLProcessor.from_pretrained(args.small_model_path, padding_side="left")
     elif "Qwen2.5" in args.small_model_path:
         small_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             args.small_model_path,
-            dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            device_map="auto",
+            **small_model_load_kwargs,
         )
         small_processor = AutoProcessor.from_pretrained(args.small_model_path, padding_side="left")
     if args.verbose:
@@ -1242,11 +1593,19 @@ def load_models(args):
 
     if args.verbose:
         print(f"Loading large model: {args.large_model_path}")
+    large_model_load_kwargs = {
+        "dtype": torch.bfloat16,
+        "attn_implementation": "flash_attention_2",
+        "device_map": "auto",
+    }
+    large_max_memory = build_realtime_max_memory_map()
+    if large_max_memory is not None:
+        large_model_load_kwargs["max_memory"] = large_max_memory
+        if args.verbose:
+            print(f"Using realtime max_memory map for large model: {large_max_memory}")
     large_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         args.large_model_path,
-        dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        device_map="auto",
+        **large_model_load_kwargs,
     )
     large_processor = AutoProcessor.from_pretrained(args.large_model_path, padding_side="left")
     if args.verbose:

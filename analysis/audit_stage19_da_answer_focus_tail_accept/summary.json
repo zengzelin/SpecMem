@@ -1,0 +1,45 @@
+{
+  "input_jsonl": "/home/zelin/SpecMem/eval_results_deepeyes/SpecEyes_vstar_stage19_da_answer_focus_tail_accept/vstar_direct_attributes_DeepEyes-7B_Qwen3-VL-2B-Instruct_6_min_0.98_mem=logic-small-k1-answer_focus.jsonl",
+  "task": "direct_attributes",
+  "total_records": 115,
+  "phase_two_candidates": 106,
+  "triggered_count": 26,
+  "accepted_after_trigger": 26,
+  "accepted_after_trigger_ratio": 1.0,
+  "answer_changed_count": 5,
+  "answer_changed_ratio": 0.192308,
+  "accepted_changed_count": 5,
+  "accepted_changed_ratio": 0.192308,
+  "raw_wrong_to_memory_correct": 1,
+  "raw_correct_to_memory_wrong": 3,
+  "raw_wrong_to_memory_wrong": 15,
+  "raw_correct_to_memory_correct": 7,
+  "corrected_count": 1,
+  "harmed_count": 3,
+  "changed_but_still_wrong_count": 1,
+  "unchanged_count": 21,
+  "tail_gain_corrected": {
+    "count": 1,
+    "mean": -0.000843,
+    "min": -0.000843,
+    "max": -0.000843
+  },
+  "tail_gain_harmed": {
+    "count": 3,
+    "mean": -0.000337,
+    "min": -0.000515,
+    "max": -8.5e-05
+  },
+  "bottom10_gain_corrected": {
+    "count": 1,
+    "mean": -0.005465,
+    "min": -0.005465,
+    "max": -0.005465
+  },
+  "bottom10_gain_harmed": {
+    "count": 3,
+    "mean": 0.001557,
+    "min": -0.001352,
+    "max": 0.006215
+  }
+}
